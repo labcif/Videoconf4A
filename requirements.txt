@@ -1,0 +1,3 @@
+pycryptodome
+python-registry
+dpapick3
