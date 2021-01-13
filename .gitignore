@@ -1,0 +1,6 @@
+*.json
+\extract
+\.vscode
+\ccl_chrome_indexeddb
+\.idea
+\__pycache__
