@@ -1,11 +1,11 @@
 import jarray
 import inspect
 import os
-import json
 from subprocess import Popen, PIPE
-import csv
+import shutil
 
 from javax.swing import JCheckBox
+import java.awt.Color
 from javax.swing import JButton
 from javax.swing import JRadioButton
 from javax.swing import ButtonGroup
@@ -35,6 +35,15 @@ from java.awt import Dimension
 from javax.swing.event import DocumentEvent
 from javax.swing.event import DocumentListener
 from javax.swing import BorderFactory
+
+from java.awt import Panel, BorderLayout, EventQueue, GridLayout, GridBagLayout, GridBagConstraints, Font, Color
+from java.awt.event import ActionListener, ActionEvent
+from java.lang import IllegalArgumentException
+from java.lang import System
+from java.util.logging import Level
+from javax.swing import BoxLayout
+from javax.swing import JCheckBox
+from javax.swing.border import TitledBorder, EtchedBorder, EmptyBorder
 
 from java.lang import Class
 from java.lang import System
@@ -90,17 +99,20 @@ class UsersNTLMHashesIngestModuleFactory(IngestModuleFactoryAdapter):
     def getModuleVersionNumber(self):
         return "1.0"
 
-    def isDataSourceIngestModuleFactory(self):
-        return True
-
     def getDefaultIngestJobSettings(self):
         return GenericIngestModuleJobSettings()
+
+    def hasIngestJobSettingsPanel(self):
+        return True
 
     def getIngestJobSettingsPanel(self, settings):
         if not isinstance(settings, GenericIngestModuleJobSettings):
             raise IllegalArgumentException("Expected settings argument to be instanceof GenericIngestModuleJobSettings")
         self.settings = settings
         return UsersNTLMHashesIngestModuleGUISettingsPanel(self.settings)
+
+    def isDataSourceIngestModuleFactory(self):
+        return True
 
     def createDataSourceIngestModule(self, ingestOptions):
         return UsersNTLMHashesIngestModule(self.settings)
@@ -131,11 +143,17 @@ class UsersNTLMHashesIngestModule(DataSourceIngestModule):
                 raise IngestModuleException("ntlm_hash_retrieval.exe was not found in module folder")
             mimikatz_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mimikatz.exe")
             if not os.path.exists(mimikatz_file):
-                raise  IngestModuleException("mimikatz.exe was not found in module folder")
+                raise IngestModuleException("mimikatz.exe was not found in module folder")
         else:
             raise IngestModuleException(UsersNTLMHashesIngestModule.moduleName + "module can only run on Windows.")
 
-        blackboard = Case.getCurrentCase().getServices().getBlackboard()
+        # Validate settings
+        output_file = self.local_settings.getSetting("output_file")
+        file_type = self.local_settings.getSetting("output_file_type")
+        if file_type is None:
+            raise IngestModuleException("File type is not define")
+        if output_file is None:
+            raise IngestModuleException("Output file is not define")
 
     # Where the analysis is done.
     def process(self, dataSource, progressBar):
@@ -155,48 +173,91 @@ class UsersNTLMHashesIngestModule(DataSourceIngestModule):
             self.log(Level.INFO, "Temporary directory already exists " + temporaryDirectory)
 
         # Retrieve SYSTEM and SAM files
-        system_file = fileManager.findFiles(dataSource, "SYSTEM", "config")
-        self.log(Level.INFO, "Size of system_file is " + str(len(system_file)))
+        system_file = fileManager.findFiles(dataSource, "SYSTEM", "config")[0]
+        sam_file = fileManager.findFiles(dataSource, "SAM", "config")[0]
 
-        sam_file = fileManager.findFiles(dataSource, "SAM", "config")
-        self.log(Level.INFO, "Size of sam_file is " + str(len(sam_file)))
+        extracted_system_file_path = self.copy_file_to_temp(system_file, temporaryDirectory)
+        extracted_sam_file_path = self.copy_file_to_temp(sam_file, temporaryDirectory)
 
+        # Retrieve output file from settings
+        output_type = self.local_settings.getSetting("output_file_type")
+        output_file = self.local_settings.getSetting("output_file")
+
+        # Get mimikatz file
+        mimikatz_file_path = os.path.dirname(os.path.realpath(__file__)) + "\\mimikatz.exe"
+
+        command_line = [str(self.pathToExe), extracted_system_file_path, extracted_sam_file_path, output_type, output_file, mimikatz_file_path]
+
+        self.log(Level.INFO, str(command_line))
+
+        pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
+        outputFromRun = pipe.communicate()[0]
+        self.log(Level.INFO, "Output from Run is ==> " + outputFromRun)
+
+        # Clean temporary directory
+        shutil.rmtree(temporaryDirectory)
 
         return IngestModule.ProcessResult.OK
 
     def copy_file_to_temp(self, file, directory):
         current_user = self.check_user_from_file(file)
         if current_user != "":
-            extracted_local_state_file_path = os.path.join(directory, file.getName() + "_" + current_user)
+            extracted_file_path = os.path.join(directory, file.getName() + "_" + current_user)
         else:
-            extracted_local_state_file_path = os.path.join(directory, file.getName())
+            extracted_file_path = os.path.join(directory, file.getName())
             i = 1
-            while os.path.exists(extracted_local_state_file_path):
-                extracted_local_state_file_path = os.path.join(directory, file.getName() + "_" + i)
+            while os.path.exists(extracted_file_path):
+                extracted_file_path = os.path.join(directory, file.getName() + "_" + str(i))
+                i += 1
 
-        ContentUtils.writeToFile(file, File(extracted_local_state_file_path))
+        ContentUtils.writeToFile(file, File(extracted_file_path))
 
-        return extracted_local_state_file_path
+        return extracted_file_path
+
+    def check_user_from_file(self, file):
+        if "/Users/" in str(file.getParentPath()):
+            current_user = str(file.getParentPath()).split("/")[2]
+            return current_user
+        return ""
 
 class UsersNTLMHashesIngestModuleGUISettingsPanel(IngestModuleIngestJobSettingsPanel):
 
     def __init__(self, settings):
         self.local_settings = settings
         self.initComponents()
+        self.customizeComponents()
 
     def onClickExport(self, e):
         chooseFile = JFileChooser()
-        currentDirectory = self.local_settings.getSetting('User_Directory')
-        if currentDirectory is not None and os.path.exists(currentDirectory):
-            chooseFile.setCurrentDirectory(File(currentDirectory))
+
+        file_type = self.local_settings.getSetting("output_file_type")
+
+        if file_type == "csv":
+            filter = FileNameExtensionFilter("CSV (Comma Delimited) (*.csv)", [file_type])
+        elif file_type == "json":
+            filter = FileNameExtensionFilter("JSON (JavaScript Object Notation) (*.json)", [file_type])
+        else:
+            filter = FileNameExtensionFilter("CSV (Comma Delimited) (*.csv)", [file_type])
+
+
+        chooseFile.setFileFilter(filter)
 
         ret = chooseFile.showDialog(self, "Specify a file to save")
 
         if ret == JFileChooser.APPROVE_OPTION:
             file = chooseFile.getSelectedFile()
             canonical_file = file.getCanonicalPath()
+            if ("." + file_type) not in canonical_file:
+                canonical_file = canonical_file + "." + file_type
             self.local_settings.setSetting('output_file', canonical_file)
             self.selectedFileLabel.setText(os.path.basename(canonical_file))
+        else:
+            self.local_settings.setSetting('output_file', None)
+            self.selectedFileLabel.setText('(no file)')
+
+    def radioBtnEvent(self, e):
+        isJsonSelected = self.radioBtnJson.isSelected()
+        self.local_settings.setSetting('output_file_type', 'json' if isJsonSelected else 'csv')
 
     def initComponents(self):
         self.setLayout(BoxLayout(self, BoxLayout.Y_AXIS))
@@ -205,20 +266,75 @@ class UsersNTLMHashesIngestModuleGUISettingsPanel(IngestModuleIngestJobSettingsP
         # main panel
         panelTop = JPanel()
         panelTop.setLayout(BoxLayout(panelTop, BoxLayout.Y_AXIS))
-        panelTop.add(JLabel(" "))
+        panelTop.setAlignmentX(JComponent.LEFT_ALIGNMENT)
         labelTop = JLabel("<html><strong>Users NTLM Hashes Settings</strong></html>")
         panelTop.add(labelTop)
         panelTop.add(JLabel(" "))
+
+        # radio btn json export file
+        panelRadioBtnJson = JPanel()
+        panelRadioBtnJson.setLayout(BoxLayout(panelRadioBtnJson, BoxLayout.X_AXIS))
+        panelRadioBtnJson.setAlignmentX(JComponent.LEFT_ALIGNMENT)
+        self.radioBtnJson = JRadioButton("JSON", actionPerformed=self.radioBtnEvent)
+        panelRadioBtnJson.add(self.radioBtnJson)
+
+        # radio btn json export file
+        panelRadioBtnCsv = JPanel()
+        panelRadioBtnCsv.setLayout(BoxLayout(panelRadioBtnCsv, BoxLayout.X_AXIS))
+        panelRadioBtnCsv.setAlignmentX(JComponent.LEFT_ALIGNMENT)
+        self.radioBtnCsv = JRadioButton("CSV", actionPerformed=self.radioBtnEvent)
+        panelRadioBtnCsv.add(self.radioBtnCsv)
 
         # export file
         panelExport = JPanel()
         panelExport.setLayout(BoxLayout(panelExport, BoxLayout.X_AXIS))
         panelExport.setAlignmentX(JComponent.LEFT_ALIGNMENT)
-        self.importButton = JButton("Results export file location", actionPerformed=self.onClickExport)
-        panelExport.add(self.importButton)
+        self.exportBtn = JButton("Results export file location", actionPerformed=self.onClickExport)
+        panelExport.add(self.exportBtn)
         panelExport.add(JLabel(" "))
         self.selectedFileLabel = JLabel("")
         panelExport.add(self.selectedFileLabel)
+
+        # group radiobuttons and export file
+        panelGroupRadioBtns = JPanel()
+        panelGroupRadioBtns.setLayout(BoxLayout(panelGroupRadioBtns, BoxLayout.X_AXIS))
+        panelGroupRadioBtns.setAlignmentX(JComponent.LEFT_ALIGNMENT)
+        buttonGroup = ButtonGroup()
+        buttonGroup.add(self.radioBtnJson)
+        buttonGroup.add(self.radioBtnCsv)
+        panelGroupRadioBtns.add(JLabel(" "))
+        panelGroupRadioBtns.add(panelRadioBtnJson)
+        panelGroupRadioBtns.add(JLabel(" "))
+        panelGroupRadioBtns.add(panelRadioBtnCsv)
+        panelGroupRadioBtns.setBorder(BorderFactory.createTitledBorder("Output file type"))
+
+        self.add(panelTop)
+        self.add(panelGroupRadioBtns)
+        self.add(JLabel(" "))
+        self.add(panelExport)
+
+    def customizeComponents(self):
+        # file type
+        file_type = self.local_settings.getSetting("output_file_type")
+        # Set default type to CSV
+        if file_type is None:
+            self.local_settings.setSetting("output_file_type", "csv")
+
+
+        # output file
+        selected_file = self.local_settings.getSetting('output_file')
+        if selected_file is not None:
+            if os.path.isfile(selected_file):
+                self.selectedFileLabel.setText(os.path.basename(selected_file))
+            else:
+                self.local_settings.setSetting('output_file', None)
+                self.selectedFileLabel.setText('(no file)')
+        else:
+            self.selectedFileLabel.setText('(no file)')
+
+    # Return the settings used
+    def getSettings(self):
+        return self.local_settings
 
 
 
