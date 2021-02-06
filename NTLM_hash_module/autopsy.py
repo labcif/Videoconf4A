@@ -173,11 +173,16 @@ class UsersNTLMHashesIngestModule(DataSourceIngestModule):
             self.log(Level.INFO, "Temporary directory already exists " + temporaryDirectory)
 
         # Retrieve SYSTEM and SAM files
-        system_file = fileManager.findFiles(dataSource, "SYSTEM", "config")[0]
-        sam_file = fileManager.findFiles(dataSource, "SAM", "config")[0]
+        system_file = fileManager.findFiles(dataSource, "SYSTEM", "config")
+        if len(system_file) == 0:
+            raise IngestModuleException("No SYSTEM hive file found.")
 
-        extracted_system_file_path = self.copy_file_to_temp(system_file, temporaryDirectory)
-        extracted_sam_file_path = self.copy_file_to_temp(sam_file, temporaryDirectory)
+        sam_file = fileManager.findFiles(dataSource, "SAM", "config")
+        if len(sam_file) == 0:
+            raise IngestModuleException("No SAM hive file found.")
+
+        extracted_system_file_path = self.copy_file_to_temp(system_file[0], temporaryDirectory)
+        extracted_sam_file_path = self.copy_file_to_temp(sam_file[0], temporaryDirectory)
 
         # Retrieve output file from settings
         output_type = self.local_settings.getSetting("output_file_type")
@@ -258,6 +263,10 @@ class UsersNTLMHashesIngestModuleGUISettingsPanel(IngestModuleIngestJobSettingsP
     def radioBtnEvent(self, e):
         isJsonSelected = self.radioBtnJson.isSelected()
         self.local_settings.setSetting('output_file_type', 'json' if isJsonSelected else 'csv')
+        selected_file = self.local_settings.getSetting('output_file')
+        if selected_file is not None:
+            filename, extension = os.path.splitext(os.path.basename(selected_file))
+            self.selectedFileLabel.setText(filename + "." + self.local_settings.getSetting("output_file_type"))
 
     def initComponents(self):
         self.setLayout(BoxLayout(self, BoxLayout.Y_AXIS))
