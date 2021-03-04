@@ -36,17 +36,12 @@ def check_parameters(options, args):
     if not args:
         sys.exit('[-] You must provide at least one MasterKey file.')
 
-def decypher_masterkey(sid, password, masterkey_file, output_file):
+def decypher_masterkey(sid, password, masterkey_file):
     with open(masterkey_file, 'rb') as f:
         #print(('[!] Working on MK %s\n-------------' % os.path.basename(arg)))
         mk = masterkey.MasterKeyFile(f.read())
         mk.decryptWithPassword(sid, password)
 
-        if ".json" not in output_file:
-            output_file = output_file + ".json"
-            
-        file_obj = open(output_file, "w")
-        print(file_obj.name)
         if mk.decrypted:
             mkey = mk.get_key()
             mk_decrypted = {
@@ -54,15 +49,14 @@ def decypher_masterkey(sid, password, masterkey_file, output_file):
                 "mk_key": mkey.hex(),
                 "mk_sha1": hashlib.sha1(mkey).digest().hex()
             }
-            file_obj.write(json.dumps(mk_decrypted, indent=4))
-            file_obj.close()
+            return mk_decrypted
         else:
             mk_failed = {
-                "status": "FAILED",
-                "mk_guid": mk.guid
+                "status": "KO",
+                "mk_guid": mk.guid,
+                "message": "Failed to decrypt masterkey! Exiting..."
             }
-            file_obj.write(json.dumps(mk_failed, indent=4))
-            file_obj.close()
+            return mk_failed
 
 if __name__ == '__main__':
     """Utility core."""

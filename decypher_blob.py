@@ -33,9 +33,7 @@ def check_parameters(options, args):
     if not args or not len(args) == 1:
         sys.exit('[-] You must provide an argument.')
 
-def decypher_blob(masterkey, blob_file, output_file):
-
-    blob_data = open(blob_file, "rb").read()
+def decypher_blob(masterkey, blob_data):
 
     blob = BLOB.DPAPIBlob(blob_data)
 
@@ -44,13 +42,9 @@ def decypher_blob(masterkey, blob_file, output_file):
         
     blob.decrypt(raw_masterkey, entropy=None)
     if blob.decrypted:
-        file_obj = open(output_file, "wb")
-        print(file_obj.name)
-        file_obj.write(blob.cleartext)
-        file_obj.close()
+        return {"status": "OK", "decrypted_blob": blob.cleartext}
     else:
-        #Handle later
-        print('[-] Unable to decrypt blob')
+        return {"status": "KO", "message": "Failed to decrypt blob"}
 
 if __name__ == '__main__':
     """Utility core."""
