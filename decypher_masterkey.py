@@ -38,7 +38,6 @@ def check_parameters(options, args):
 
 def decypher_masterkey(sid, password, masterkey_file):
     with open(masterkey_file, 'rb') as f:
-        #print(('[!] Working on MK %s\n-------------' % os.path.basename(arg)))
         mk = masterkey.MasterKeyFile(f.read())
         mk.decryptWithPassword(sid, password)
 

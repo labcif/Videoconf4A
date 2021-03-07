@@ -1,13 +1,11 @@
 import sys, json
 
-from parse_local_state import parse_local_state_key
 from decypher_masterkey import decypher_masterkey
 from decypher_blob import decypher_blob
-from DecryptChrome import DecryptChrome
+from DecryptChrome import DecryptChrome, parse_local_state_key
 
 
 if __name__ == "__main__":
-    # Too many args, turn into config file
     local_state_enc_file = sys.argv[1]
     sid = sys.argv[2]
     password = sys.argv[3]

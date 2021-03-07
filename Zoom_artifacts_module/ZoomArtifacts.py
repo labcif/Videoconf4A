@@ -75,6 +75,7 @@ from org.sleuthkit.autopsy.casemodule import Case
 from org.sleuthkit.autopsy.casemodule.services import Services
 from org.sleuthkit.autopsy.casemodule.services import FileManager
 from org.sleuthkit.autopsy.datamodel import ContentUtils
+from org.sleuthkit.autopsy.directorytree.actionhelpers import ExtractActionHelper
 
 
 # from org.sleuthkit.datamodel import CommunicationsManager
@@ -146,7 +147,10 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
         # Zoom artifacts
         self.art_chrome_cookies = self.create_artifact_type("ZOOM_COOKIES", "Zoom Chrome Cookies", blackboard)
-        self.art_chrome_cookies = self.create_artifact_type("ZOOM_LOGIN_DATA", "Zoom Chrome Login Data", blackboard)
+        self.art_chrome_login_data = self.create_artifact_type("ZOOM_LOGIN_DATA", "Zoom Chrome Login Data", blackboard)
+
+        # Generic Attributes
+        self.att_win_user = self.create_attribute_type("WIN_USER", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Windows User", blackboard)
 
         # Cookies Attributes
         self.att_key = self.create_attribute_type("COOKIES_ZOOM_KEY", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Key", blackboard)
@@ -175,6 +179,8 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
         fileManager = Case.getCurrentCase().getServices().getFileManager()
         blackboard = Case.getCurrentCase().getServices().getBlackboard()
+
+        self.moduleName = Videoconf4AIngestModuleFactory.moduleName
 
         # Create Event Log directory in temp directory, if it exists then continue on processing
         temporaryDirectory = os.path.join(Case.getCurrentCase().getTempDirectory(), "ZOOM_ARTIFACTS_TEMP")
@@ -228,8 +234,6 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                 if master_key["user"] == user:
                     master_key_list.append(master_key)
 
-            correct_files = False
-
             for local_state_file in local_state_files:
                 for files in chrome_files:
                     for master_key_obj in master_key_list:
@@ -245,16 +249,14 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
                         # If return code is 0 means script was successful and masterkey was the correct else continue
                         if rc == 0:
-                            #correct_files = True
                             for extracted_file in extracted_files:
+                                file_obj = extracted_file["file"]
+
+                                # Add artifact and attributes for Chrome cookies
                                 if extracted_file["file_extracted_path"] == files[0]:
-                                    file_obj = extracted_file["file"]
-                                    art = file_obj.newArtifact(self.art_chrome_cookies.getTypeID())
-                                    # Iterate cookies and add attribute
-                                    #art.addAttribute(BlackboardAttribute(self.att_key, self.moduleName, str()))
-                            break
-                    # if correct_files is True:
-                    #     break
+                                    self.chrome_cookies_artifact(file_obj, os.path.join(user_temporary_directory, "cookies_results.json"), user)
+                                elif extracted_file["file_extracted_path"] == files[1]:
+                                    self.chrome_login_data_artifact(file_obj, os.path.join(user_temporary_directory, "login_data_results.json"), user)
 
         # After all databases, post a message to the ingest messages in box.
         message = IngestMessage.createMessage(IngestMessage.MessageType.DATA, "Zoom Cookies Decrypt", "Zoom Cookies Have Been Decrypted")
@@ -264,6 +266,50 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         shutil.rmtree(temporaryDirectory)
 
         return IngestModule.ProcessResult.OK
+
+    def create_user_temp_dir(self, directory, user):
+        # Create an user specific temporary folder
+        user_extract_folder = os.path.join(directory, user)
+
+        # Create user temporary folder
+        try:
+            os.mkdir(user_extract_folder)
+        except:
+            pass
+            self.log(Level.INFO, "Temporary user folder already created -> " + user_extract_folder + ".")
+
+        return user_extract_folder
+
+    def chrome_cookies_artifact(self, file_obj, cookies_file_path, user):
+        cookies_file_obj = open(cookies_file_path, "r")
+        cookies_file = json.loads(cookies_file_obj.read())
+
+        for cookie in cookies_file:
+            if "zoom" in cookie["key"]:
+                self.log(Level.INFO, "Creating Zoom Chrome cookies artifacts and attributes...")
+                art = file_obj.newArtifact(self.art_chrome_cookies.getTypeID())
+                art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
+                art.addAttribute(BlackboardAttribute(self.att_key, self.moduleName, str(cookie["key"])))
+                art.addAttribute(BlackboardAttribute(self.att_name, self.moduleName, str(cookie["name"])))
+                art.addAttribute(BlackboardAttribute(self.att_value, self.moduleName, str(cookie["value"])))
+
+        cookies_file_obj.close()
+
+    def chrome_login_data_artifact(self, file_obj, login_data_path, user):
+        login_data_file_obj = open(login_data_path, "r")
+        login_data_file = json.loads(login_data_file_obj.read())
+
+        for login_data in login_data_file:
+            if "zoom" in login_data["url"]:
+                self.log(Level.INFO, "Creating Zoom Chrome login data artifacts and attributes...")
+                art = file_obj.newArtifact(self.art_chrome_login_data.getTypeID())
+                art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
+                art.addAttribute(BlackboardAttribute(self.att_url, self.moduleName, str(login_data["url"])))
+                art.addAttribute(BlackboardAttribute(self.att_user_type, self.moduleName, str(login_data["username_type"])))
+                art.addAttribute(BlackboardAttribute(self.att_username, self.moduleName, str(login_data["username"])))
+                art.addAttribute(BlackboardAttribute(self.att_password, self.moduleName, str(login_data["password"])))
+
+        login_data_file_obj.close()
 
     def read_users_passwords_file(self):
         # Retrieve data from users passwords
@@ -305,47 +351,22 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
         home_dir = None
 
-        if len(users_dirs) > 1:
-            self.log(Level.WARNING, "Several directories that matched */Users/" + user + "/*. Iterating to find the correct home dir")
-            # Check for a path like /Users/{user}/Desktop
-            for user_home_dir in users_dirs:
-                path = user_home_dir.getParentPath() + user_home_dir.getName()
-
-                desktop_path = "/Users/" + user + "/Desktop"
-                desktop_folders = fileManager.findFiles(dataSource, "Desktop", path)
-                self.log(Level.INFO, "Searched path -> " + path + "/Desktop" + ". Found " + str(len(desktop_folders)) + " matches")
-                for desktop_folder in desktop_folders:
-                    path = desktop_folder.getParentPath() + desktop_folder.getName()
-                    if path == desktop_path:
-                        home_dir = user_home_dir
-                        self.log(Level.INFO, "Found home directory!")
-                        break
-
-                if home_dir is not None:
+        if len(users_dirs) > 0:
+            home_path = "/Users/" + user
+            for user_dir in users_dirs:
+                path = user_dir.getParentPath() + user_dir.getName()
+                self.log(Level.INFO, "Checking if path " + path + " is the home directory...")
+                if path == home_path:
+                    home_dir = user_dir
                     break
 
-            if home_dir is None:
-                raise UserNotFoundException
-        else:
-            path = users_dirs[0].getParentPath() + users_dirs[0].getName()
-            if path == ("/Users/" + user + "/Desktop"):
-                home_dir = users_dirs[0]
-                self.log(Level.INFO, str(home_dir))
-            else:
-                raise UserNotFoundException
+        if home_dir is None:
+            raise UserNotFoundException
 
         home_dir_path = home_dir.getParentPath() + home_dir.getName()
         self.log(Level.INFO, "Found user \"" + user + "\". User's home directory -> " + home_dir_path)
 
-        # Create an user specific temporary folder
-        user_extract_folder = os.path.join(extractDirectory, user)
-
-        # Create user temporary folder
-        try:
-            os.mkdir(user_extract_folder)
-        except:
-            pass
-            self.log(Level.INFO, "Temporary user folder already created -> " + user_extract_folder + ".")
+        user_extract_folder = self.create_user_temp_dir(extractDirectory, user)
 
         # Append the home dir to the filesName.
         extracted_files = []
