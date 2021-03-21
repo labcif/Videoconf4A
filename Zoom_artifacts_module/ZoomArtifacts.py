@@ -6,6 +6,7 @@ from subprocess import Popen, PIPE
 import csv
 import glob
 import shutil
+from time import sleep
 
 from javax.swing import JCheckBox
 import java.awt.Color
@@ -75,7 +76,6 @@ from org.sleuthkit.autopsy.casemodule import Case
 from org.sleuthkit.autopsy.casemodule.services import Services
 from org.sleuthkit.autopsy.casemodule.services import FileManager
 from org.sleuthkit.autopsy.datamodel import ContentUtils
-from org.sleuthkit.autopsy.directorytree.actionhelpers import ExtractActionHelper
 
 
 # from org.sleuthkit.datamodel import CommunicationsManager
@@ -146,11 +146,12 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         blackboard = Case.getCurrentCase().getServices().getBlackboard()
 
         # Zoom artifacts
-        self.art_chrome_cookies = self.create_artifact_type("ZOOM_COOKIES", "Zoom Chrome Cookies", blackboard)
-        self.art_chrome_login_data = self.create_artifact_type("ZOOM_LOGIN_DATA", "Zoom Chrome Login Data", blackboard)
+        self.art_cookies = self.create_artifact_type("ZOOM_COOKIES", "Zoom Cookies", blackboard)
+        self.art_login_data = self.create_artifact_type("ZOOM_LOGIN_DATA", "Zoom Login Data", blackboard)
 
         # Generic Attributes
         self.att_win_user = self.create_attribute_type("WIN_USER", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Windows User", blackboard)
+        self.att_browser = self.create_attribute_type("BROWSER", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Browser", blackboard)
 
         # Cookies Attributes
         self.att_key = self.create_attribute_type("COOKIES_ZOOM_KEY", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Key", blackboard)
@@ -191,7 +192,13 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             pass
             self.log(Level.INFO, "Temporary directory already exists " + temporaryDirectory)
 
-        # Read the users passwords file
+        # LevelDB parsing
+        browser_data = fileManager.findFiles(dataSource, "%", "/Users/%/AppData/Local/%/%/User Data")
+        self.browser_dirs_extract(browser_data, temporaryDirectory)
+
+        # EXECUTE HINDSIGHT TO GET LEVELDB ARTIFACTS
+
+        # Read the users passwords file (TODO: Make optional)
         users_passwords = self.read_users_passwords_file()
 
         # Retrieve MasterKey files
@@ -201,71 +208,139 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             user = user_password["user"]
             password = user_password["password"]
 
-            # Google Chrome artifacts
-
-            ## Artifact files without the user path
-            chrome_artifact_files = [
-                # Local State file (required to decrypt SQLite files)
-                "/AppData/Local/Google/Chrome/User Data/Local State",
-                # Cookies File
-                "/AppData/Local/Google/Chrome/User Data/Default/Cookies",
-                # Saved login info file
-                "/AppData/Local/Google/Chrome/User Data/Default/Login Data",
-                # History file
-                "/AppData/Local/Google/Chrome/User Data/Default/History"
-            ]
-
-            # Extract artifact files to temporary directory for users
-            extracted_files = self.extract_files_from_user(fileManager, dataSource, user, chrome_artifact_files, temporaryDirectory)
-
             user_temporary_directory = os.path.join(temporaryDirectory, user)
 
-            local_state_files = glob.glob(user_temporary_directory + "/Local State*")
-            cookies_files = glob.glob(user_temporary_directory + "/Cookies*")
-            login_data_files = glob.glob(user_temporary_directory + "/Login Data*")
+            data_in_dir = os.listdir(user_temporary_directory)
+            browsers = []
+            for data in data_in_dir:
+                if os.path.isdir(os.path.join(user_temporary_directory, data)):
+                    browsers.append(data)
 
-            chrome_files = zip(cookies_files, login_data_files)
+            for browser in browsers:
 
-            self.log(Level.INFO, str(chrome_files))
+                browser_temp_dir = os.path.join(user_temporary_directory, browser)
 
-            master_key_list = []
+                # Get file instances for artifacts
+                cookies_file = None
+                login_data_file = None
+                for data in browser_data:
+                    path = data.getParentPath() + data.getName()
+                    search_cookies_path = browser + "/User Data/Default/Cookies"
+                    search_login_data_path = browser + "/User Data/Default/Login Data"
+                    if search_cookies_path in path:
+                        cookies_file = data
+                    if search_login_data_path in path:
+                        login_data_file = data
 
-            for master_key in master_keys:
-                if master_key["user"] == user:
-                    master_key_list.append(master_key)
+                local_state_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Local State")
 
-            for local_state_file in local_state_files:
-                for files in chrome_files:
-                    for master_key_obj in master_key_list:
+                if not os.path.exists(local_state_file_path):
+                    self.log(Level.WARNING, "Cannot retrieve \"Local State\" file to search artifacts on browser " + browser + " for user " + user)
+                    continue
 
-                        command_line = [str(self.pathToExe), local_state_file, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], files[0], files[1], user_temporary_directory]
+                cookies_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Cookies")
 
-                        self.log(Level.INFO, str(command_line))
+                if not os.path.exists(cookies_file_path):
+                    self.log(Level.WARNING, "Cannot retrieve \"Cookies\" file to search artifacts on browser " + browser + " for user " + user)
+                    continue
 
-                        pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
-                        outputFromRun = pipe.communicate()[0]
-                        rc = pipe.returncode
-                        self.log(Level.INFO, "Output from Run is ==> " + outputFromRun)
+                login_data_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Login Data")
 
-                        # If return code is 0 means script was successful and masterkey was the correct else continue
-                        if rc == 0:
-                            for extracted_file in extracted_files:
-                                file_obj = extracted_file["file"]
+                if not os.path.exists(login_data_file_path):
+                    self.log(Level.WARNING, "Cannot retrieve \"Login Data\" file to search artifacts on browser " + browser + " for user " + user)
+                    continue
 
-                                # Add artifact and attributes for Chrome cookies
-                                if extracted_file["file_extracted_path"] == files[0]:
-                                    self.chrome_cookies_artifact(file_obj, os.path.join(user_temporary_directory, "cookies_results.json"), user)
-                                elif extracted_file["file_extracted_path"] == files[1]:
-                                    self.chrome_login_data_artifact(file_obj, os.path.join(user_temporary_directory, "login_data_results.json"), user)
+                master_key_list = []
+
+                for master_key in master_keys:
+                    if master_key["user"] == user:
+                        master_key_list.append(master_key)
+
+                for master_key_obj in master_key_list:
+
+                    command_line = [str(self.pathToExe), local_state_file_path, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], cookies_file_path, login_data_file_path, browser_temp_dir]
+
+                    self.log(Level.INFO, str(command_line))
+
+                    pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
+                    outputFromRun = pipe.communicate()[0]
+                    rc = pipe.returncode
+                    self.log(Level.INFO, "Output from Run is ==> " + outputFromRun)
+
+                    # If return code is 0 means script was successful and masterkey was the correct one. Else continue
+                    if rc == 0:
+                        self.log(Level.INFO, "Retrieved artifacts for user " + user + " and browser " + browser)
+                        self.cookies_artifact(cookies_file, browser, os.path.join(browser_temp_dir, "cookies_results.json"), user)
+                        self.login_data_artifact(login_data_file, browser, os.path.join(browser_temp_dir, "login_data_results.json"), user)
+                        break
 
         # After all databases, post a message to the ingest messages in box.
         message = IngestMessage.createMessage(IngestMessage.MessageType.DATA, "Zoom Cookies Decrypt", "Zoom Cookies Have Been Decrypted")
         IngestServices.getInstance().postMessage(message)
 
         # Clean temporary directory
-        shutil.rmtree(temporaryDirectory)
+        #shutil.rmtree(temporaryDirectory)
 
         return IngestModule.ProcessResult.OK
+
+    def browser_dirs_extract(self, browser_data, temporaryDirectory):
+        for data in browser_data:
+            if data.getName() == "." or data.getName() == "..":
+                continue
+            path = data.getParentPath() + data.getName()
+            user = path.split("/")[2]
+            browser = path.split("/")[6]
+            user_temporary_directory = self.create_user_temp_dir(temporaryDirectory, user)
+
+            # Build path for default
+            user_browser_default_path = os.path.join(user_temporary_directory, browser, "User Data")
+
+            try:
+                os.makedirs(user_browser_default_path)
+            except OSError:
+                pass
+
+            path_chain = user_browser_default_path
+            if "/User Data/Default" in path:
+                path_chain = os.path.join(user_browser_default_path, "Default")
+                try:
+                    os.mkdir(path_chain)
+                except OSError:
+                    pass
+                after_default_path = path.split("Default")[1].split("/")
+                # Build path chain until current dir/file on Default dir
+                if len(after_default_path) > 2:
+                    size_default_path = len(after_default_path)
+                    for i, directory in enumerate(after_default_path):
+                        next_index = i + 1
+                        if next_index == size_default_path:
+                            break
+                        try:
+                            dir_path = os.path.join(path_chain, directory)
+                            if os.path.exists(dir_path):
+                                path_chain = dir_path
+                                continue
+                            path_chain = dir_path
+                            os.mkdir(dir_path)
+                        except OSError:
+                            pass
+
+            data_type = str(data.dirType)
+
+            if data_type == "DIR":
+                try:
+                    if path_chain == user_browser_default_path:
+                        if data.getName() == "Default":
+                            dir_path = os.path.join(path_chain, data.getName())
+                            os.mkdir(dir_path)
+                    else:
+                        dir_path = os.path.join(path_chain, data.getName())
+                        os.mkdir(dir_path)
+                except OSError:
+                    pass
+            elif data_type == "REG":
+                self.copy_file_to_temp(data, path_chain, data.getName())
+
 
     def create_user_temp_dir(self, directory, user):
         # Create an user specific temporary folder
@@ -276,34 +351,36 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             os.mkdir(user_extract_folder)
         except:
             pass
-            self.log(Level.INFO, "Temporary user folder already created -> " + user_extract_folder + ".")
+            #self.log(Level.INFO, "Temporary user folder already created -> " + user_extract_folder + ".")
 
         return user_extract_folder
 
-    def chrome_cookies_artifact(self, file_obj, cookies_file_path, user):
+    def cookies_artifact(self, file_obj, browser, cookies_file_path, user):
         cookies_file_obj = open(cookies_file_path, "r")
         cookies_file = json.loads(cookies_file_obj.read())
 
         for cookie in cookies_file:
             if "zoom" in cookie["key"]:
-                self.log(Level.INFO, "Creating Zoom Chrome cookies artifacts and attributes...")
-                art = file_obj.newArtifact(self.art_chrome_cookies.getTypeID())
+                self.log(Level.INFO, "Creating Zoom cookies artifacts and attributes for user " + user + " on browser " + browser)
+                art = file_obj.newArtifact(self.art_cookies.getTypeID())
                 art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
+                art.addAttribute(BlackboardAttribute(self.att_browser, self.moduleName, str(browser)))
                 art.addAttribute(BlackboardAttribute(self.att_key, self.moduleName, str(cookie["key"])))
                 art.addAttribute(BlackboardAttribute(self.att_name, self.moduleName, str(cookie["name"])))
                 art.addAttribute(BlackboardAttribute(self.att_value, self.moduleName, str(cookie["value"])))
 
         cookies_file_obj.close()
 
-    def chrome_login_data_artifact(self, file_obj, login_data_path, user):
+    def login_data_artifact(self, file_obj, browser, login_data_path, user):
         login_data_file_obj = open(login_data_path, "r")
         login_data_file = json.loads(login_data_file_obj.read())
 
         for login_data in login_data_file:
             if "zoom" in login_data["url"]:
-                self.log(Level.INFO, "Creating Zoom Chrome login data artifacts and attributes...")
-                art = file_obj.newArtifact(self.art_chrome_login_data.getTypeID())
+                self.log(Level.INFO, "Creating Zoom login data artifacts and attributes for user " + user + " on browser " + browser)
+                art = file_obj.newArtifact(self.art_login_data.getTypeID())
                 art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
+                art.addAttribute(BlackboardAttribute(self.att_browser, self.moduleName, str(browser)))
                 art.addAttribute(BlackboardAttribute(self.att_url, self.moduleName, str(login_data["url"])))
                 art.addAttribute(BlackboardAttribute(self.att_user_type, self.moduleName, str(login_data["username_type"])))
                 art.addAttribute(BlackboardAttribute(self.att_username, self.moduleName, str(login_data["username"])))
@@ -341,63 +418,6 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
         return users_passwords
 
-    def extract_files_from_user(self, fileManager, dataSource, user, filesName, extractDirectory):
-
-        # Check if user exists
-        users_dirs = fileManager.findFiles(dataSource, user, "Users")
-        if len(users_dirs) <= 0:
-            self.log(Level.WARNING, "Could not find user \"" + user + "\". Skipping...")
-            raise UserNotFoundException
-
-        home_dir = None
-
-        if len(users_dirs) > 0:
-            home_path = "/Users/" + user
-            for user_dir in users_dirs:
-                path = user_dir.getParentPath() + user_dir.getName()
-                self.log(Level.INFO, "Checking if path " + path + " is the home directory...")
-                if path == home_path:
-                    home_dir = user_dir
-                    break
-
-        if home_dir is None:
-            raise UserNotFoundException
-
-        home_dir_path = home_dir.getParentPath() + home_dir.getName()
-        self.log(Level.INFO, "Found user \"" + user + "\". User's home directory -> " + home_dir_path)
-
-        user_extract_folder = self.create_user_temp_dir(extractDirectory, user)
-
-        # Append the home dir to the filesName.
-        extracted_files = []
-        for i, _ in enumerate(filesName):
-            filesName[i] = home_dir_path + filesName[i]
-
-            path, filename = os.path.split(filesName[i])
-
-            files = fileManager.findFiles(dataSource, filename, path)
-            self.log(Level.INFO, "Found " + str(len(files)) + " matches for file path -> " + filesName[i] + ".")
-
-            if len(files) <= 0:
-                self.log(Level.WARNING, "No files found with path like *" + filesName[i] + "*. Skipping...")
-                continue
-
-            if len(files) > 1:
-                for j, file_to_extract in enumerate(files):
-                    if j == 0:
-                        name_iteration = ""
-                    else:
-                        name_iteration = "_" + str(j)
-                    extracted_path = self.copy_file_to_temp(file_to_extract, user_extract_folder, file_to_extract.getName() + name_iteration)
-                    extracted_files.append({"file": file_to_extract, "file_extracted_path": extracted_path})
-                self.log(Level.INFO, "Extracted " + str(len(files)) + " files named \"" + filename + "\".")
-            else:
-                file_to_extract = files[0]
-                extracted_path = self.copy_file_to_temp(file_to_extract, user_extract_folder, file_to_extract.getName())
-                extracted_files.append({"file": file_to_extract, "file_extracted_path": extracted_path})
-                self.log(Level.INFO, "Extracted 1 file named \"" + filename + "\".")
-        return extracted_files
-
 
     def retrieve_master_keys(self, fileManager, dataSource, extractDirectory):
         # Retrieve MasterKey files
@@ -417,10 +437,6 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             # Should only be one master key?
             #i = 0
             for master_key_file in master_keys_files:
-                # if i == 0:
-                #     name_iteration = ""
-                # else:
-                #     name_iteration = "_" + str(i)
 
                 if master_key_file.getName() in excluded_files:
                     continue
@@ -448,6 +464,7 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             art = blackboard.getOrAddArtifactType(art_name, art_desc)
         except Exception as e:
             self.log(Level.INFO, "Error getting or adding artifact type: " + art_desc + " " + str(e))
+            return None
         return art
 
     def create_attribute_type(self, att_name, type_name, att_desc, blackboard):
@@ -455,6 +472,7 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             att_type = blackboard.getOrAddAttributeType(att_name, type_name, att_desc)
         except Exception as e:
             self.log(Level.INFO, "Error getting or adding attribute type: " + att_desc + " " + str(e))
+            return None
         return att_type
 
     def copy_file_to_temp(self, file, directory, filename):
