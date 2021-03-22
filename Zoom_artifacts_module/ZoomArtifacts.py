@@ -4,6 +4,8 @@ import os
 import json
 from subprocess import Popen, PIPE
 import csv
+import sys
+from com.ziclix.python.sql import zxJDBC
 import glob
 import shutil
 from time import sleep
@@ -77,6 +79,22 @@ from org.sleuthkit.autopsy.casemodule.services import Services
 from org.sleuthkit.autopsy.casemodule.services import FileManager
 from org.sleuthkit.autopsy.datamodel import ContentUtils
 
+def getConnection(jdbc_url, driverName):
+    """
+        Given the name of a JDBC driver class and the url to be used
+        to connect to a database, attempt to obtain a connection to
+        the database.
+    """
+
+    try:
+        # no user/password combo needed here, hence the None, None
+        dbConn = zxJDBC.connect(jdbc_url, None, None, driverName)
+    except zxJDBC.DatabaseError, msg:
+        print msg
+        sys.exit(-1)
+
+    return dbConn
+
 
 # from org.sleuthkit.datamodel import CommunicationsManager
 # from org.sleuthkit.datamodel import Relationship
@@ -137,9 +155,10 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         self.context = context
         if PlatformUtil.isWindowsOS():
             self.log(Level.INFO, os.path.join(os.path.dirname(os.path.abspath(__file__))))
-            self.pathToExe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decrypt_chrome.exe")
-            if not os.path.exists(self.pathToExe):
-                raise IngestModuleException("artifacts_decipher\\main.exe was not found in module folder")
+            self.path_decrypt_chromium = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decrypt_chromium.exe")
+            self.path_leveldb_parse = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hindsight.exe")
+            if not os.path.exists(self.path_decrypt_chromium) and not os.path.exists(self.path_leveldb_parse):
+                raise IngestModuleException("Required executable files not found on module directory. Required executables are \"decrypt_chromium.exe\" and \"hindsight.exe\"")
         else:
             raise IngestModuleException(Videoconf4AIngestModuleFactory.moduleName + "module can only run on Windows.")
 
@@ -148,21 +167,26 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         # Zoom artifacts
         self.art_cookies = self.create_artifact_type("ZOOM_COOKIES", "Zoom Cookies", blackboard)
         self.art_login_data = self.create_artifact_type("ZOOM_LOGIN_DATA", "Zoom Login Data", blackboard)
+        self.art_levelDB = self.create_artifact_type("ZOOM_LEVELDB", "Zoom LevelDB parsed", blackboard)
 
         # Generic Attributes
         self.att_win_user = self.create_attribute_type("WIN_USER", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Windows User", blackboard)
         self.att_browser = self.create_attribute_type("BROWSER", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Browser", blackboard)
+        self.att_key = self.create_attribute_type("KEY", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Key", blackboard)
+        self.att_value = self.create_attribute_type("VALUE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Value", blackboard)
 
         # Cookies Attributes
-        self.att_key = self.create_attribute_type("COOKIES_ZOOM_KEY", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Key", blackboard)
         self.att_name = self.create_attribute_type("COOKIES_ZOOM_NAME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Name", blackboard)
-        self.att_value = self.create_attribute_type("COOKIES_ZOOM_VALUE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Value", blackboard)
 
         # Login Data Attributes
         self.att_url = self.create_attribute_type("LOGIN_DATA_ZOOM_URL", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "URL", blackboard)
         self.att_user_type = self.create_attribute_type("LOGIN_DATA_ZOOM_USER_TYPE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Username type", blackboard)
         self.att_username = self.create_attribute_type("LOGIN_DATA_ZOOM_USERNAME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Username", blackboard)
         self.att_password = self.create_attribute_type("LOGIN_DATA_ZOOM_PASSWORD", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Password", blackboard)
+
+        # LevelDB Parser Attributes
+        self.att_origin = self.create_attribute_type("LEVELDB_ZOOM_ORIGIN", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Origin", blackboard)
+        self.att_state = self.create_attribute_type("LEVELDB_ZOOM_STATE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "State", blackboard)
 
         # Validate settings
         users_passwords_file = self.local_settings.getSetting("users_passwords_file")
@@ -196,7 +220,61 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         browser_data = fileManager.findFiles(dataSource, "%", "/Users/%/AppData/Local/%/%/User Data")
         self.browser_dirs_extract(browser_data, temporaryDirectory)
 
-        # EXECUTE HINDSIGHT TO GET LEVELDB ARTIFACTS
+        data_in_dir = os.listdir(temporaryDirectory)
+        users = []
+        for data in data_in_dir:
+            if os.path.isdir(os.path.join(temporaryDirectory, data)):
+                users.append(data)
+
+        for user in users:
+            user_temporary_directory = os.path.join(temporaryDirectory, user)
+            data_in_dir = os.listdir(user_temporary_directory)
+            browsers = []
+            for data in data_in_dir:
+                if os.path.isdir(os.path.join(user_temporary_directory, data)):
+                    browsers.append(data)
+
+            for browser in browsers:
+                browser_temp_dir = os.path.join(user_temporary_directory, browser)
+                default_temp_dir = os.path.join(browser_temp_dir, "User Data", "Default")
+
+                if not os.path.exists(default_temp_dir):
+                    self.log(Level.WARNING, "Could not find \"Default\" directory for LevelDB parsing for browser " + browser + " and user " + user)
+                    continue
+
+                output_file = os.path.join(browser_temp_dir, "leveldb_parsed")
+
+                command_line = [str(self.path_leveldb_parse), "-i", str(default_temp_dir), "-o", str(output_file), "-f", "sqlite"]
+                self.log(Level.INFO, str(command_line))
+
+                pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
+                outputFromRun = pipe.communicate()[0]
+                rc = pipe.returncode
+
+                self.log(Level.INFO, "Output from LevelDB parse is ==> " + outputFromRun)
+
+                # If return code is 0 means script was successful and masterkey was the correct one. Else continue
+                if rc == 0:
+                    output_file = output_file + ".sqlite"
+                    JDBC_URL = "jdbc:sqlite:%s" % output_file
+                    JDBC_DRIVER = "org.sqlite.JDBC"
+
+                    conn = getConnection(JDBC_URL, JDBC_DRIVER)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT origin, key, value, state, source_path FROM storage WHERE origin LIKE '%zoom%'")
+
+                    for result in cursor.fetchall():
+                        source_path = result[4]
+
+                        splited_path = source_path.split("\\")
+
+                        data_source_files = fileManager.findFiles(dataSource, splited_path[-1], splited_path[-2])
+                        for data_source_file in data_source_files:
+                            data_source_path = data_source_file.getName() + data_source_file.getParentPath()
+                            if (browser + "/User Data/Default") in data_source_path and user in data_source_path:
+                                self.leveldb_artifact(data_source_file, browser, result, user)
+                                break
+
 
         # Read the users passwords file (TODO: Make optional)
         users_passwords = self.read_users_passwords_file()
@@ -258,14 +336,14 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
                 for master_key_obj in master_key_list:
 
-                    command_line = [str(self.pathToExe), local_state_file_path, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], cookies_file_path, login_data_file_path, browser_temp_dir]
+                    command_line = [str(self.path_decrypt_chromium), local_state_file_path, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], cookies_file_path, login_data_file_path, browser_temp_dir]
 
                     self.log(Level.INFO, str(command_line))
 
                     pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
                     outputFromRun = pipe.communicate()[0]
                     rc = pipe.returncode
-                    self.log(Level.INFO, "Output from Run is ==> " + outputFromRun)
+                    self.log(Level.INFO, "Output from Chromium decryption for browser " + browser + " and user " + user + " is --> " + outputFromRun)
 
                     # If return code is 0 means script was successful and masterkey was the correct one. Else continue
                     if rc == 0:
@@ -279,7 +357,7 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         IngestServices.getInstance().postMessage(message)
 
         # Clean temporary directory
-        #shutil.rmtree(temporaryDirectory)
+        shutil.rmtree(temporaryDirectory)
 
         return IngestModule.ProcessResult.OK
 
@@ -354,6 +432,16 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             #self.log(Level.INFO, "Temporary user folder already created -> " + user_extract_folder + ".")
 
         return user_extract_folder
+
+    def leveldb_artifact(self, file_obj, browser, attributes, user):
+        art = file_obj.newArtifact(self.art_levelDB.getTypeID())
+        art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
+        art.addAttribute(BlackboardAttribute(self.att_browser, self.moduleName, str(browser)))
+        art.addAttribute(BlackboardAttribute(self.att_origin, self.moduleName, str(attributes[0])))
+        art.addAttribute(BlackboardAttribute(self.att_key, self.moduleName, str(attributes[1])))
+        art.addAttribute(BlackboardAttribute(self.att_value, self.moduleName, str(attributes[2])))
+        art.addAttribute(BlackboardAttribute(self.att_state, self.moduleName, str(attributes[3])))
+
 
     def cookies_artifact(self, file_obj, browser, cookies_file_path, user):
         cookies_file_obj = open(cookies_file_path, "r")
