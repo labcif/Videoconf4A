@@ -9,6 +9,7 @@ from com.ziclix.python.sql import zxJDBC
 import glob
 import shutil
 from time import sleep
+import urlparse
 
 from javax.swing import JCheckBox
 import java.awt.Color
@@ -157,7 +158,8 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             self.log(Level.INFO, os.path.join(os.path.dirname(os.path.abspath(__file__))))
             self.path_decrypt_chromium = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decrypt_chromium.exe")
             self.path_leveldb_parse = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hindsight.exe")
-            if not os.path.exists(self.path_decrypt_chromium) and not os.path.exists(self.path_leveldb_parse):
+            self.path_os_check = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_os_datasource.exe")
+            if not os.path.exists(self.path_decrypt_chromium) and not os.path.exists(self.path_leveldb_parse) and not os.path.exists(self.path_os_check):
                 raise IngestModuleException("Required executable files not found on module directory. Required executables are \"decrypt_chromium.exe\" and \"hindsight.exe\"")
         else:
             raise IngestModuleException(Videoconf4AIngestModuleFactory.moduleName + "module can only run on Windows.")
@@ -168,18 +170,20 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         self.art_cookies = self.create_artifact_type("ZOOM_COOKIES", "Zoom Cookies", blackboard)
         self.art_login_data = self.create_artifact_type("ZOOM_LOGIN_DATA", "Zoom Login Data", blackboard)
         self.art_levelDB = self.create_artifact_type("ZOOM_LEVELDB", "Zoom LevelDB parsed", blackboard)
+        self.art_meetings = self.create_artifact_type("ZOOM_MEETINGS", "Zoom Meetings", blackboard)
 
         # Generic Attributes
         self.att_win_user = self.create_attribute_type("WIN_USER", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Windows User", blackboard)
         self.att_browser = self.create_attribute_type("BROWSER", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Browser", blackboard)
         self.att_key = self.create_attribute_type("KEY", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Key", blackboard)
         self.att_value = self.create_attribute_type("VALUE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Value", blackboard)
+        self.att_url = self.create_attribute_type("URL", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "URL", blackboard)
+        self.att_datetime = self.create_attribute_type("DATETIME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Date & Time", blackboard)
 
         # Cookies Attributes
         self.att_name = self.create_attribute_type("COOKIES_ZOOM_NAME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Name", blackboard)
 
         # Login Data Attributes
-        self.att_url = self.create_attribute_type("LOGIN_DATA_ZOOM_URL", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "URL", blackboard)
         self.att_user_type = self.create_attribute_type("LOGIN_DATA_ZOOM_USER_TYPE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Username type", blackboard)
         self.att_username = self.create_attribute_type("LOGIN_DATA_ZOOM_USERNAME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Username", blackboard)
         self.att_password = self.create_attribute_type("LOGIN_DATA_ZOOM_PASSWORD", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Password", blackboard)
@@ -187,6 +191,12 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         # LevelDB Parser Attributes
         self.att_origin = self.create_attribute_type("LEVELDB_ZOOM_ORIGIN", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Origin", blackboard)
         self.att_state = self.create_attribute_type("LEVELDB_ZOOM_STATE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "State", blackboard)
+
+        # Zoom Meetings Attributes
+        self.att_meeting_id = self.create_attribute_type("ZOOM_MEETING_ID", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Meeting ID", blackboard)
+        self.att_enc_password = self.create_attribute_type("ZOOM_MEETING_PWD", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Encrypted Password", blackboard)
+        self.att_visit_count = self.create_attribute_type("ZOOM_MEETING_VISIT_COUNT", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Visit Count", blackboard)
+
 
         # Validate settings
         users_passwords_file = self.local_settings.getSetting("users_passwords_file")
@@ -216,7 +226,37 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             pass
             self.log(Level.INFO, "Temporary directory already exists " + temporaryDirectory)
 
-        # LevelDB parsing
+        # Check if datasource is Windows OS
+        software_files = fileManager.findFiles(dataSource, "SOFTWARE", "config")
+
+        if len(software_files) == 0:
+            self.log(Level.INFO, "size of software files -> " + str(len(software_files)))
+            raise IngestModuleException("Datasource OS is not Windows")
+
+        software_hive = None
+
+        for software_file in software_files:
+            path = software_file.getParentPath() + software_file.getName()
+
+            if "/Windows/System32/config/SOFTWARE" in path:
+                software_hive = software_file
+
+        if software_hive is not None:
+            software_hive_path = self.copy_file_to_temp(software_hive, temporaryDirectory, "SOFTWARE")
+
+            command_line = [str(self.path_os_check), software_hive_path]
+            pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
+            outputFromRun = pipe.communicate()[0]
+            rc = pipe.returncode
+
+            if rc != 0:
+                self.log(Level.INFO, "rc is " + str(rc))
+                raise IngestModuleException("Datasource OS is not Windows")
+            self.log(Level.INFO, "Datasource OS is -> " + outputFromRun)
+        else:
+            self.log(Level.INFO, "No software file that is the hive")
+            raise IngestModuleException("Datasource OS is not Windows")
+
         browser_data = fileManager.findFiles(dataSource, "%", "/Users/%/AppData/Local/%/%/User Data")
         self.browser_dirs_extract(browser_data, temporaryDirectory)
 
@@ -239,9 +279,41 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                 default_temp_dir = os.path.join(browser_temp_dir, "User Data", "Default")
 
                 if not os.path.exists(default_temp_dir):
-                    self.log(Level.WARNING, "Could not find \"Default\" directory for LevelDB parsing for browser " + browser + " and user " + user)
+                    self.log(Level.WARNING, "Could not find \"Default\" directory for LevelDB parsing and zoom meetings IDs gathering for browser " + browser + " and user " + user)
                     continue
 
+                # Gather Zoom meetings IDs
+                history_file_path = os.path.join(default_temp_dir, "History")
+                if not os.path.exists(history_file_path):
+                    self.log(Level.WARNING, "Could not find history file for Zoom meetings IDs gathering for browser " + browser + " and user " + user)
+                else:
+                    datasource_history_file = None
+                    datasource_history_path = browser + "/User Data/Default/History"
+                    history_files = fileManager.findFiles(dataSource, "History", "Default")
+                    for hist_file in history_files:
+                        hist_file_path = hist_file.getParentPath() + hist_file.getName()
+                        if datasource_history_path in hist_file_path and user in hist_file_path:
+                            datasource_history_file = hist_file
+
+                    JDBC_URL = "jdbc:sqlite:%s" % history_file_path
+                    JDBC_DRIVER = "org.sqlite.JDBC"
+
+                    conn = getConnection(JDBC_URL, JDBC_DRIVER)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT url, visit_count, datetime(last_visit_time/1000000-11644473600,'unixepoch') as datetime FROM urls WHERE url LIKE '%.zoom.us/j/%'")
+
+                    for result in cursor.fetchall():
+                        url = result[0]
+                        parsed_url = urlparse.urlparse(url)
+                        meeting_id = str(parsed_url.path.replace("/j/", ""))
+                        visit_count = result[1]
+                        datetime = result[2]
+                        enc_pwd = str(urlparse.parse_qs(parsed_url.query).get("pwd", None)[0])
+
+                        if datasource_history_file is not None:
+                            self.meetings_artifact(datasource_history_file, meeting_id, url, visit_count, datetime, enc_pwd)
+
+                # LevelDB parsing
                 output_file = os.path.join(browser_temp_dir, "leveldb_parsed")
 
                 command_line = [str(self.path_leveldb_parse), "-i", str(default_temp_dir), "-o", str(output_file), "-f", "sqlite"]
@@ -267,14 +339,16 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                         source_path = result[4]
 
                         splited_path = source_path.split("\\")
+                        user_data_path = source_path.split("User Data")[1].replace("\\", "/")
 
                         data_source_files = fileManager.findFiles(dataSource, splited_path[-1], splited_path[-2])
                         for data_source_file in data_source_files:
-                            data_source_path = data_source_file.getName() + data_source_file.getParentPath()
-                            if (browser + "/User Data/Default") in data_source_path and user in data_source_path:
+                            data_source_path = data_source_file.getParentPath() + data_source_file.getName()
+                            if user_data_path in data_source_path and browser in data_source_path and user in data_source_path:
                                 self.leveldb_artifact(data_source_file, browser, result, user)
                                 break
-
+                    conn.close()
+                os.remove(output_file)
 
         # Read the users passwords file (TODO: Make optional)
         users_passwords = self.read_users_passwords_file()
@@ -356,9 +430,6 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         message = IngestMessage.createMessage(IngestMessage.MessageType.DATA, "Zoom Cookies Decrypt", "Zoom Cookies Have Been Decrypted")
         IngestServices.getInstance().postMessage(message)
 
-        # Clean temporary directory
-        shutil.rmtree(temporaryDirectory)
-
         return IngestModule.ProcessResult.OK
 
     def browser_dirs_extract(self, browser_data, temporaryDirectory):
@@ -432,6 +503,16 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             #self.log(Level.INFO, "Temporary user folder already created -> " + user_extract_folder + ".")
 
         return user_extract_folder
+
+    def meetings_artifact(self, file_obj, meeting_id, url, visit_count, datetime, enc_password=None):
+        art = file_obj.newArtifact(self.art_meetings.getTypeID())
+        art.addAttribute(BlackboardAttribute(self.att_meeting_id, self.moduleName, str(meeting_id)))
+        art.addAttribute(BlackboardAttribute(self.att_url, self.moduleName, str(url)))
+        art.addAttribute(BlackboardAttribute(self.att_visit_count, self.moduleName, str(visit_count)))
+        art.addAttribute(BlackboardAttribute(self.att_datetime, self.moduleName, str(datetime)))
+
+        if enc_password is not None:
+            art.addAttribute(BlackboardAttribute(self.att_enc_password, self.moduleName, str(enc_password)))
 
     def leveldb_artifact(self, file_obj, browser, attributes, user):
         art = file_obj.newArtifact(self.art_levelDB.getTypeID())
