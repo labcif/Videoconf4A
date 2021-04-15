@@ -197,15 +197,6 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         self.att_enc_password = self.create_attribute_type("ZOOM_MEETING_PWD", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Encrypted Password", blackboard)
         self.att_visit_count = self.create_attribute_type("ZOOM_MEETING_VISIT_COUNT", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Visit Count", blackboard)
 
-
-        # Validate settings
-        users_passwords_file = self.local_settings.getSetting("users_passwords_file")
-        file_type = self.local_settings.getSetting("file_type")
-        if file_type is None:
-            raise IngestModuleException("File type is not define")
-        if users_passwords_file is None:
-            raise IngestModuleException("Users Passwords file is not define")
-
     # Where the analysis is done.
     def process(self, dataSource, progressBar):
 
@@ -230,7 +221,7 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         software_files = fileManager.findFiles(dataSource, "SOFTWARE", "config")
 
         if len(software_files) == 0:
-            self.log(Level.INFO, "size of software files -> " + str(len(software_files)))
+            self.log(Level.INFO, "size of SOFTWARE files -> " + str(len(software_files)))
             raise IngestModuleException("Datasource OS is not Windows")
 
         software_hive = None
@@ -350,87 +341,94 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                     conn.close()
                 os.remove(output_file)
 
-        # Read the users passwords file (TODO: Make optional)
-        users_passwords = self.read_users_passwords_file()
+        # Read the users passwords file (Optional)
+        users_passwords_file = self.local_settings.getSetting("users_passwords_file")
+        file_type = self.local_settings.getSetting("file_type")
 
-        # Retrieve MasterKey files
-        master_keys = self.retrieve_master_keys(fileManager, dataSource, temporaryDirectory)
+        if file_type and users_passwords_file:
+            users_passwords = self.read_users_passwords_file()
 
-        for user_password in users_passwords:
-            user = user_password["user"]
-            password = user_password["password"]
+            # Retrieve MasterKey files
+            master_keys = self.retrieve_master_keys(fileManager, dataSource, temporaryDirectory)
 
-            user_temporary_directory = os.path.join(temporaryDirectory, user)
+            for user_password in users_passwords:
+                user = user_password["user"]
+                password = user_password["password"]
 
-            data_in_dir = os.listdir(user_temporary_directory)
-            browsers = []
-            for data in data_in_dir:
-                if os.path.isdir(os.path.join(user_temporary_directory, data)):
-                    browsers.append(data)
+                user_temporary_directory = os.path.join(temporaryDirectory, user)
 
-            for browser in browsers:
+                data_in_dir = os.listdir(user_temporary_directory)
+                browsers = []
+                for data in data_in_dir:
+                    if os.path.isdir(os.path.join(user_temporary_directory, data)):
+                        browsers.append(data)
 
-                browser_temp_dir = os.path.join(user_temporary_directory, browser)
+                for browser in browsers:
 
-                # Get file instances for artifacts
-                cookies_file = None
-                login_data_file = None
-                for data in browser_data:
-                    path = data.getParentPath() + data.getName()
-                    search_cookies_path = browser + "/User Data/Default/Cookies"
-                    search_login_data_path = browser + "/User Data/Default/Login Data"
-                    if search_cookies_path in path:
-                        cookies_file = data
-                    if search_login_data_path in path:
-                        login_data_file = data
+                    browser_temp_dir = os.path.join(user_temporary_directory, browser)
 
-                local_state_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Local State")
+                    # Get file instances for artifacts
+                    cookies_file = None
+                    login_data_file = None
+                    for data in browser_data:
+                        path = data.getParentPath() + data.getName()
+                        search_cookies_path = browser + "/User Data/Default/Cookies"
+                        search_login_data_path = browser + "/User Data/Default/Login Data"
+                        if search_cookies_path in path:
+                            cookies_file = data
+                        if search_login_data_path in path:
+                            login_data_file = data
 
-                if not os.path.exists(local_state_file_path):
-                    self.log(Level.WARNING, "Cannot retrieve \"Local State\" file to search artifacts on browser " + browser + " for user " + user)
-                    continue
+                    local_state_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Local State")
 
-                cookies_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Cookies")
+                    if not os.path.exists(local_state_file_path):
+                        self.log(Level.WARNING, "Cannot retrieve \"Local State\" file to search artifacts on browser " + browser + " for user " + user)
+                        continue
 
-                if not os.path.exists(cookies_file_path):
-                    self.log(Level.WARNING, "Cannot retrieve \"Cookies\" file to search artifacts on browser " + browser + " for user " + user)
-                    continue
+                    cookies_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Cookies")
 
-                login_data_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Login Data")
+                    if not os.path.exists(cookies_file_path):
+                        self.log(Level.WARNING, "Cannot retrieve \"Cookies\" file to search artifacts on browser " + browser + " for user " + user)
+                        continue
 
-                if not os.path.exists(login_data_file_path):
-                    self.log(Level.WARNING, "Cannot retrieve \"Login Data\" file to search artifacts on browser " + browser + " for user " + user)
-                    continue
+                    login_data_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Login Data")
 
-                master_key_list = []
+                    if not os.path.exists(login_data_file_path):
+                        self.log(Level.WARNING, "Cannot retrieve \"Login Data\" file to search artifacts on browser " + browser + " for user " + user)
+                        continue
 
-                for master_key in master_keys:
-                    if master_key["user"] == user:
-                        master_key_list.append(master_key)
+                    master_key_list = []
 
-                for master_key_obj in master_key_list:
+                    for master_key in master_keys:
+                        if master_key["user"] == user:
+                            master_key_list.append(master_key)
 
-                    command_line = [str(self.path_decrypt_chromium), local_state_file_path, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], cookies_file_path, login_data_file_path, browser_temp_dir]
+                    for master_key_obj in master_key_list:
 
-                    self.log(Level.INFO, str(command_line))
+                        command_line = [str(self.path_decrypt_chromium), local_state_file_path, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], cookies_file_path, login_data_file_path, browser_temp_dir]
 
-                    pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
-                    outputFromRun = pipe.communicate()[0]
-                    rc = pipe.returncode
-                    self.log(Level.INFO, "Output from Chromium decryption for browser " + browser + " and user " + user + " is --> " + outputFromRun)
+                        self.log(Level.INFO, str(command_line))
 
-                    # If return code is 0 means script was successful and masterkey was the correct one. Else continue
-                    if rc == 0:
-                        self.log(Level.INFO, "Retrieved artifacts for user " + user + " and browser " + browser)
-                        self.cookies_artifact(cookies_file, browser, os.path.join(browser_temp_dir, "cookies_results.json"), user)
-                        self.login_data_artifact(login_data_file, browser, os.path.join(browser_temp_dir, "login_data_results.json"), user)
-                        break
+                        pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
+                        outputFromRun = pipe.communicate()[0]
+                        rc = pipe.returncode
+                        self.log(Level.INFO, "Output from Chromium decryption for browser " + browser + " and user " + user + " is --> " + outputFromRun)
 
-        # After all databases, post a message to the ingest messages in box.
-        message = IngestMessage.createMessage(IngestMessage.MessageType.DATA, "Zoom Cookies Decrypt", "Zoom Cookies Have Been Decrypted")
-        IngestServices.getInstance().postMessage(message)
+                        # If return code is 0 means script was successful and masterkey was the correct one. Else continue
+                        if rc == 0:
+                            self.log(Level.INFO, "Retrieved artifacts for user " + user + " and browser " + browser)
+                            self.cookies_artifact(cookies_file, browser, os.path.join(browser_temp_dir, "cookies_results.json"), user)
+                            self.login_data_artifact(login_data_file, browser, os.path.join(browser_temp_dir, "login_data_results.json"), user)
+                            break
 
-        return IngestModule.ProcessResult.OK
+            # After all databases, post a message to the ingest messages in box.
+            message = IngestMessage.createMessage(IngestMessage.MessageType.DATA, "Zoom Cookies Decrypt", "Zoom Cookies Have Been Decrypted")
+            IngestServices.getInstance().postMessage(message)
+
+            return IngestModule.ProcessResult.OK
+
+        if file_type ^ users_passwords_file:
+            raise IngestModuleException("Error retrieving users password file...")
 
     def browser_dirs_extract(self, browser_data, temporaryDirectory):
         for data in browser_data:
@@ -667,6 +665,7 @@ class Videoconf4AIngestModuleGUISettingsPanel(IngestModuleIngestJobSettingsPanel
 
     def onClickImport(self, e):
         chooseFile = JFileChooser()
+        chooseFile.setAcceptAllFileFilterUsed(False)
 
         file_type = self.local_settings.getSetting("file_type")
 
@@ -699,7 +698,61 @@ class Videoconf4AIngestModuleGUISettingsPanel(IngestModuleIngestJobSettingsPanel
         selected_file = self.local_settings.getSetting('users_passwords_file')
         if selected_file is not None:
             filename, extension = os.path.splitext(os.path.basename(selected_file))
-            self.selectedFileLabel.setText(filename + "." + self.local_settings.getSetting("file_type"))
+            new_path = selected_file.replace(filename + extension, filename + "." + self.local_settings.getSetting("file_type"))
+            if os.path.exists(new_path):
+                self.local_settings.setSetting('users_passwords_file', new_path)
+                self.selectedFileLabel.setText(filename + "." + self.local_settings.getSetting("file_type"))
+            else:
+                self.local_settings.setSetting('users_passwords_file', None)
+                self.selectedFileLabel.setText('(no file)')
+        else:
+            self.local_settings.setSetting('users_passwords_file', None)
+            self.selectedFileLabel.setText('(no file)')
+
+    def onClickGenerate(self, e):
+        chooseFile = JFileChooser()
+        chooseFile.setDialogTitle("Specify the file to be generated")
+        chooseFile.setAcceptAllFileFilterUsed(False)
+
+        file_type = self.local_settings.getSetting("file_type")
+
+        if file_type == "csv":
+            filter = FileNameExtensionFilter("CSV (Comma Delimited) (*.csv)", [file_type])
+        elif file_type == "json":
+            filter = FileNameExtensionFilter("JSON (JavaScript Object Notation) (*.json)", [file_type])
+        else:
+            filter = FileNameExtensionFilter("CSV (Comma Delimited) (*.csv)", [file_type])
+
+        chooseFile.setFileFilter(filter)
+
+        ret = chooseFile.showDialog(self, "Save")
+
+        if ret == JFileChooser.APPROVE_OPTION:
+            file = chooseFile.getSelectedFile()
+            canonical_file = file.getCanonicalPath()
+            if ("." + file_type) not in canonical_file:
+                canonical_file = canonical_file + "." + file_type
+            file_obj = open(canonical_file, "w")
+            if file_type == "json":
+                users_password_template = [
+                    {
+                        "user": "johnny",
+                        "password": "12345"
+                    },
+                    {
+                        "user": "mike",
+                        "password": "abcd"
+                    }
+                ]
+                users_password_template = json.dumps(users_password_template, indent=4)
+                file_obj.write(users_password_template)
+                file_obj.close()
+            else:
+                users_password_template = "User,Password\njohnny,12345\nmike,abcd"
+                file_obj.write(users_password_template)
+                file_obj.close()
+            self.local_settings.setSetting('users_passwords_file', canonical_file)
+            self.selectedFileLabel.setText(os.path.basename(canonical_file))
 
     def initComponents(self):
         self.setLayout(BoxLayout(self, BoxLayout.Y_AXIS))
@@ -737,6 +790,13 @@ class Videoconf4AIngestModuleGUISettingsPanel(IngestModuleIngestJobSettingsPanel
         self.selectedFileLabel = JLabel("")
         panelExport.add(self.selectedFileLabel)
 
+        # generate file
+        panelGenerateFile = JPanel()
+        panelGenerateFile.setLayout(BoxLayout(panelGenerateFile, BoxLayout.X_AXIS))
+        panelGenerateFile.setAlignmentX(JComponent.LEFT_ALIGNMENT)
+        buttonGenerateFile = JButton("Generate users passwords file", actionPerformed=self.onClickGenerate)
+        panelGenerateFile.add(buttonGenerateFile)
+
         # group radiobuttons
         panelGroupRadioBtns = JPanel()
         panelGroupRadioBtns.setLayout(BoxLayout(panelGroupRadioBtns, BoxLayout.X_AXIS))
@@ -765,6 +825,8 @@ class Videoconf4AIngestModuleGUISettingsPanel(IngestModuleIngestJobSettingsPanel
         panelUsersPasswords.add(labelDescriptionUsersPasswords)
         panelUsersPasswords.add(JLabel(" "))
         panelUsersPasswords.add(panelGroupRadioBtns)
+        panelUsersPasswords.add(JLabel(" "))
+        panelUsersPasswords.add(panelGenerateFile)
         panelUsersPasswords.add(JLabel(" "))
         panelUsersPasswords.add(panelExport)
         panelUsersPasswords.add(JLabel(" "))
