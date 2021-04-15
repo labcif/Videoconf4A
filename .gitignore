@@ -1,4 +1,5 @@
 *.json
+*.csv
 \extract
 \.vscode
 \ccl_chrome_indexeddb
