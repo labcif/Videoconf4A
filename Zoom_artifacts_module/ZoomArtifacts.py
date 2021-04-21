@@ -291,15 +291,22 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
                     conn = getConnection(JDBC_URL, JDBC_DRIVER)
                     cursor = conn.cursor()
-                    cursor.execute("SELECT url, visit_count, datetime(last_visit_time/1000000-11644473600,'unixepoch') as datetime FROM urls WHERE url LIKE '%.zoom.us/j/%'")
+                    cursor.execute("SELECT url, visit_count, datetime(last_visit_time/1000000-11644473600,'unixepoch') as datetime FROM urls WHERE url LIKE '%.zoom.us/j/%' OR url LIKE '%.zoom.us/s/%'")
 
                     for result in cursor.fetchall():
                         url = result[0]
                         parsed_url = urlparse.urlparse(url)
-                        meeting_id = str(parsed_url.path.replace("/j/", ""))
+                        if "/j/" in parsed_url.path:
+                            meeting_id = str(parsed_url.path.replace("/j/", ""))
+                        elif "/s/" in parsed_url.path:
+                            meeting_id = str(parsed_url.path.replace("/s/", ""))
+                        else:
+                            meeting_id = None
                         visit_count = result[1]
                         datetime = result[2]
-                        enc_pwd = str(urlparse.parse_qs(parsed_url.query).get("pwd", None)[0])
+                        enc_pwd = urlparse.parse_qs(parsed_url.query).get("pwd", None)
+                        if enc_pwd:
+                            enc_pwd = str(enc_pwd)
 
                         if datasource_history_file is not None:
                             self.meetings_artifact(datasource_history_file, meeting_id, url, visit_count, datetime, enc_pwd)
