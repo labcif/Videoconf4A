@@ -5,3 +5,6 @@
 \ccl_chrome_indexeddb
 \.idea
 \__pycache__
+\Zoom_App_Decrypt\*.txt
+\Zoom_App_Decrypt\*.db
+\sqlcipher
