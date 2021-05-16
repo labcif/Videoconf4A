@@ -1,7 +1,7 @@
 import sys, json
 
-from decypher_masterkey import decypher_masterkey
-from decypher_blob import decypher_blob
+from DPAPI_Tools.decypher_masterkey import decypher_masterkey
+from DPAPI_Tools.decypher_blob import decypher_blob
 from DecryptChromium import DecryptChromium, parse_local_state_key
 
 
