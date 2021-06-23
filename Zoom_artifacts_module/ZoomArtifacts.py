@@ -10,6 +10,7 @@ import glob
 import shutil
 from time import sleep
 import urlparse
+import struct
 
 from javax.swing import JCheckBox
 import java.awt.Color
@@ -155,11 +156,20 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
     def startUp(self, context):
         self.context = context
         if PlatformUtil.isWindowsOS():
+            arch_info = 8 * struct.calcsize("P")
+
             self.log(Level.INFO, os.path.join(os.path.dirname(os.path.abspath(__file__))))
-            self.path_decrypt_chromium = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decrypt_chromium.exe")
-            self.path_leveldb_parse = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hindsight.exe")
-            self.path_os_check = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_os_datasource.exe")
-            if not os.path.exists(self.path_decrypt_chromium) and not os.path.exists(self.path_leveldb_parse) and not os.path.exists(self.path_os_check):
+
+            if arch_info == 64:
+                self.path_decrypt_chromium = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decrypt_chromium.exe")
+                self.path_leveldb_parse = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hindsight.exe")
+                self.path_os_check = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_os_datasource.exe")
+                self.path_mimikatz = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mimikatz.exe")
+                self.sqlcipher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sqlcipher_x64.exe")
+                self.zoom_app_decrypt = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zoom_app_decrypt.exe")
+
+            # TODO: Build 32 bit executables
+            if not os.path.exists(self.path_decrypt_chromium) and not os.path.exists(self.path_leveldb_parse) and not os.path.exists(self.path_os_check) and not os.path.exists(self.path_mimikatz) and not os.path.exists(self.sqlcipher) and not os.path.exists(self.zoom_app_decrypt):
                 raise IngestModuleException("Required executable files not found on module directory. Required executables are \"decrypt_chromium.exe\" and \"hindsight.exe\"")
         else:
             raise IngestModuleException(Videoconf4AIngestModuleFactory.moduleName + "module can only run on Windows.")
@@ -171,6 +181,9 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         self.art_login_data = self.create_artifact_type("ZOOM_LOGIN_DATA", "Zoom Login Data", blackboard)
         self.art_levelDB = self.create_artifact_type("ZOOM_LEVELDB", "Zoom LevelDB parsed", blackboard)
         self.art_meetings = self.create_artifact_type("ZOOM_MEETINGS", "Zoom Meetings", blackboard)
+        self.art_saved_meetings = self.create_artifact_type("ZOOM_SAVED_MEETINGS", "Zoom Saved Meetings (Desktop App)", blackboard)
+        self.art_cached_profile_pictures = self.create_artifact_type("ZOOM_CACHED_PROFILE_PICS", "Zoom Cached Profile Pictures (Desktop App)", blackboard)
+        self.art_user_account = self.create_artifact_type("ZOOM_USER_ACCOUNT", "Zoom User Account (Desktop App)", blackboard)
 
         # Generic Attributes
         self.att_win_user = self.create_attribute_type("WIN_USER", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Windows User", blackboard)
@@ -179,6 +192,8 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         self.att_value = self.create_attribute_type("VALUE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Value", blackboard)
         self.att_url = self.create_attribute_type("URL", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "URL", blackboard)
         self.att_datetime = self.create_attribute_type("DATETIME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Date & Time", blackboard)
+        self.att_path = self.create_attribute_type("ZOOM_PATH", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Path", blackboard)
+        self.att_filesize = self.create_attribute_type("ZOOM_FILE_SIZE", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "File Size", blackboard)
 
         # Cookies Attributes
         self.att_name = self.create_attribute_type("COOKIES_ZOOM_NAME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Name", blackboard)
@@ -196,6 +211,25 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
         self.att_meeting_id = self.create_attribute_type("ZOOM_MEETING_ID", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Meeting ID", blackboard)
         self.att_enc_password = self.create_attribute_type("ZOOM_MEETING_PWD", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Encrypted Password", blackboard)
         self.att_visit_count = self.create_attribute_type("ZOOM_MEETING_VISIT_COUNT", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Visit Count", blackboard)
+
+        # Zoom Saved Meetings Attributes
+        self.att_host_id = self.create_attribute_type("ZOOM_HOST_ID", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Host ID", blackboard)
+        self.att_meeting_num = self.create_attribute_type("ZOOM_MEETING_NUM", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Meeting Number", blackboard)
+        self.att_meeting_topic = self.create_attribute_type("ZOOM_MEETING_TOPIC", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Meeting Topic", blackboard)
+        self.att_meeting_join_time = self.create_attribute_type("ZOOM_MEETING_JOIN_TIME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Meeting Join Time", blackboard)
+        self.att_meeting_duration = self.create_attribute_type("ZOOM_MEETING_DURATION", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Meeting Duration", blackboard)
+        self.att_meeting_record_path = self.create_attribute_type("ZOOM_MEETING_RECORD_PATH", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Meeting Record Path", blackboard)
+
+        # Zoom User Account Attributes
+        self.att_uid = self.create_attribute_type("ZOOM_ACCOUNT_UID", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "User ID", blackboard)
+        self.att_username = self.create_attribute_type("ZOOM_ACCOUNT_USERNAME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Username", blackboard)
+        self.att_zoom_uid = self.create_attribute_type("ZOOM_ACCOUNT_ZOOM_UID", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Zoom UID", blackboard)
+        self.att_account_id = self.create_attribute_type("ZOOM_ACCOUNT_ID", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Account ID", blackboard)
+        self.att_refresh_token = self.create_attribute_type("ZOOM_ACCOUNT_REFRESH_TOKEN", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Refresh Token", blackboard)
+        self.att_email = self.create_attribute_type("ZOOM_ACCOUNT_EMAIL", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Email", blackboard)
+        self.att_first_name = self.create_attribute_type("ZOOM_ACCOUNT_FIRST_NAME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "First Name", blackboard)
+        self.att_last_name = self.create_attribute_type("ZOOM_ACCOUNT_LAST_NAME", BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, "Last Name", blackboard)
+
 
     # Where the analysis is done.
     def process(self, dataSource, progressBar):
@@ -261,6 +295,7 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             user_temporary_directory = os.path.join(temporaryDirectory, user)
             data_in_dir = os.listdir(user_temporary_directory)
             browsers = []
+
             for data in data_in_dir:
                 if os.path.isdir(os.path.join(user_temporary_directory, data)):
                     browsers.append(data)
@@ -364,59 +399,112 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
                 user_temporary_directory = os.path.join(temporaryDirectory, user)
 
+                if not os.path.isdir(user_temporary_directory):
+                    self.log(Level.WARNING, user + " is not a recognized user... Skipping")
+                    continue
+
                 data_in_dir = os.listdir(user_temporary_directory)
                 browsers = []
                 for data in data_in_dir:
                     if os.path.isdir(os.path.join(user_temporary_directory, data)):
                         browsers.append(data)
 
-                for browser in browsers:
+                # Desktop application
+                app_user_temporary_directory = os.path.join(user_temporary_directory, "desktop_app")
+                try:
+                    os.mkdir(app_user_temporary_directory)
+                except OSError:
+                    pass
+                app_data = fileManager.findFiles(dataSource, "%", "/Users/" + user + "/AppData/Roaming/Zoom")
+                self.app_dirs_extract(app_data, app_user_temporary_directory)
 
-                    browser_temp_dir = os.path.join(user_temporary_directory, browser)
+                zoom_config_file = os.path.join(app_user_temporary_directory, "data", "Zoom.us.ini")
+                zoom_us_enc_db_file = fileManager.findFiles(dataSource, "zoomus.enc.db", "data")
 
-                    # Get file instances for artifacts
-                    cookies_file = None
-                    login_data_file = None
-                    for data in browser_data:
-                        path = data.getParentPath() + data.getName()
-                        search_cookies_path = browser + "/User Data/Default/Cookies"
-                        search_login_data_path = browser + "/User Data/Default/Login Data"
-                        if search_cookies_path in path:
-                            cookies_file = data
-                        if search_login_data_path in path:
-                            login_data_file = data
+                # Better verification?
+                if len(zoom_us_enc_db_file) > 0:
+                    zoom_us_enc_db_file = zoom_us_enc_db_file[0]
+                zoom_us_enc_db_file_path = os.path.join(app_user_temporary_directory, "data", "zoomus.enc.db")
 
-                    local_state_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Local State")
+                zoom_meeting_enc_db_file = fileManager.findFiles(dataSource, "zoommeeting.enc.db", "data")
+                # Better verification?
+                if len(zoom_meeting_enc_db_file) > 0:
+                    zoom_meeting_enc_db_file = zoom_meeting_enc_db_file[0]
+                zoom_meeting_enc_db_file_path = os.path.join(app_user_temporary_directory, "data", "zoommeeting.enc.db")
 
-                    if not os.path.exists(local_state_file_path):
-                        self.log(Level.WARNING, "Cannot retrieve \"Local State\" file to search artifacts on browser " + browser + " for user " + user)
-                        continue
+                master_key_list = []
 
-                    cookies_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Cookies")
+                for master_key in master_keys:
+                    if master_key["user"] == user:
+                        master_key_list.append(master_key)
 
-                    if not os.path.exists(cookies_file_path):
-                        self.log(Level.WARNING, "Cannot retrieve \"Cookies\" file to search artifacts on browser " + browser + " for user " + user)
-                        continue
+                for master_key_obj in master_key_list:
 
-                    login_data_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Login Data")
+                    # Get App artifacts
+                    command_line_app_us = [str(self.zoom_app_decrypt), zoom_config_file, self.sqlcipher, self.path_mimikatz, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], zoom_us_enc_db_file_path, app_user_temporary_directory]
+                    #command_line_app_meeting = [str(self.zoom_app_decrypt), zoom_config_file, self.sqlcipher, self.path_mimikatz, master_key_obj["sid"], password, master_key_obj["master_key_file"], zoom_meeting_enc_db_file_path, app_user_temporary_directory]
 
-                    if not os.path.exists(login_data_file_path):
-                        self.log(Level.WARNING, "Cannot retrieve \"Login Data\" file to search artifacts on browser " + browser + " for user " + user)
-                        continue
+                    self.log(Level.INFO, str(command_line_app_us))
+                    #self.log(Level.INFO, str(command_line_app_meeting))
 
-                    master_key_list = []
+                    pipe = Popen(command_line_app_us, shell=False, stdout=PIPE, stderr=PIPE)
+                    outputFromRun = pipe.communicate()[0]
+                    rc = pipe.returncode
+                    self.log(Level.INFO, "Output from Zoom Desktop App decryption for user " + user + " is --> " + outputFromRun)
 
-                    for master_key in master_keys:
-                        if master_key["user"] == user:
-                            master_key_list.append(master_key)
+                    # If return code is 0 means script was successful and masterkey was the correct one. Else continue
+                    if rc == 0:
+                        self.log(Level.INFO, "Retrieved desktop artifacts for user " + user)
+                        message = IngestMessage.createMessage(IngestMessage.MessageType.DATA, "Zoom Desktop Application Artifacts", "Retrieved artifacts for desktop application for user  " + user)
+                        IngestServices.getInstance().postMessage(message)
+                        self.saved_meetings_artifact(zoom_us_enc_db_file, os.path.join(app_user_temporary_directory, "saved_meetings.json"), user)
+                        self.cached_profile_pictures(zoom_us_enc_db_file, os.path.join(app_user_temporary_directory, "cached_profile_pics.json"), user)
+                        self.user_accounts(zoom_us_enc_db_file, os.path.join(app_user_temporary_directory, "zoom_accounts.json"), user)
+                        break
 
-                    for master_key_obj in master_key_list:
+                for master_key_obj in master_key_list:
 
-                        command_line = [str(self.path_decrypt_chromium), local_state_file_path, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], cookies_file_path, login_data_file_path, browser_temp_dir]
+                    # Browser artifacts
+                    for browser in browsers:
 
-                        self.log(Level.INFO, str(command_line))
+                        browser_temp_dir = os.path.join(user_temporary_directory, browser)
 
-                        pipe = Popen(command_line, shell=False, stdout=PIPE, stderr=PIPE)
+                        # Get file instances for artifacts
+                        cookies_file = None
+                        login_data_file = None
+                        for data in browser_data:
+                            path = data.getParentPath() + data.getName()
+                            search_cookies_path = browser + "/User Data/Default/Cookies"
+                            search_login_data_path = browser + "/User Data/Default/Login Data"
+                            if search_cookies_path in path:
+                                cookies_file = data
+                            if search_login_data_path in path:
+                                login_data_file = data
+
+                        local_state_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Local State")
+
+                        if not os.path.exists(local_state_file_path):
+                            self.log(Level.WARNING, "Cannot retrieve \"Local State\" file to search artifacts on browser " + browser + " for user " + user)
+                            continue
+
+                        cookies_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Cookies")
+
+                        if not os.path.exists(cookies_file_path):
+                            self.log(Level.WARNING, "Cannot retrieve \"Cookies\" file to search artifacts on browser " + browser + " for user " + user)
+                            continue
+
+                        login_data_file_path = os.path.join(user_temporary_directory, browser, "User Data", "Default", "Login Data")
+
+                        if not os.path.exists(login_data_file_path):
+                            self.log(Level.WARNING, "Cannot retrieve \"Login Data\" file to search artifacts on browser " + browser + " for user " + user)
+                            continue
+
+                        # Get browser artifacts
+                        command_line_chromium = [str(self.path_decrypt_chromium), local_state_file_path, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], cookies_file_path, login_data_file_path, browser_temp_dir]
+
+                        self.log(Level.INFO, str(command_line_chromium))
+
+                        pipe = Popen(command_line_chromium, shell=False, stdout=PIPE, stderr=PIPE)
                         outputFromRun = pipe.communicate()[0]
                         rc = pipe.returncode
                         self.log(Level.INFO, "Output from Chromium decryption for browser " + browser + " and user " + user + " is --> " + outputFromRun)
@@ -424,13 +512,11 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                         # If return code is 0 means script was successful and masterkey was the correct one. Else continue
                         if rc == 0:
                             self.log(Level.INFO, "Retrieved artifacts for user " + user + " and browser " + browser)
+                            message = IngestMessage.createMessage(IngestMessage.MessageType.DATA, "Zoom Browser Artifacts", "Retrieved artifacts for user " + user + " and browser " + browser)
+                            IngestServices.getInstance().postMessage(message)
                             self.cookies_artifact(cookies_file, browser, os.path.join(browser_temp_dir, "cookies_results.json"), user)
                             self.login_data_artifact(login_data_file, browser, os.path.join(browser_temp_dir, "login_data_results.json"), user)
                             break
-
-            # After all databases, post a message to the ingest messages in box.
-            message = IngestMessage.createMessage(IngestMessage.MessageType.DATA, "Zoom Cookies Decrypt", "Zoom Cookies Have Been Decrypted")
-            IngestServices.getInstance().postMessage(message)
 
             return IngestModule.ProcessResult.OK
 
@@ -496,6 +582,49 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                 self.copy_file_to_temp(data, path_chain, data.getName())
 
 
+    def app_dirs_extract(self, app_data, temporaryDirectory):
+        for data in app_data:
+            if data.getName() == "." or data.getName() == "..":
+                continue
+
+            path = data.getParentPath() + data.getName()
+
+            path_chain = temporaryDirectory
+            after_zoom_path = path.split("Zoom")[1].split("/")
+            # Build path chain until current dir/file on Default dir
+            if len(after_zoom_path) > 2:
+                size_zoom_path = len(after_zoom_path)
+                for i, directory in enumerate(after_zoom_path):
+                    next_index = i + 1
+                    if next_index == size_zoom_path:
+                        break
+                    try:
+                        dir_path = os.path.join(path_chain, directory)
+                        if os.path.exists(dir_path):
+                            path_chain = dir_path
+                            continue
+                        path_chain = dir_path
+                        os.mkdir(dir_path)
+                    except OSError:
+                        pass
+
+            data_type = str(data.dirType)
+
+            if data_type == "DIR":
+                try:
+                    if path_chain == temporaryDirectory:
+                        if data.getName() == "Default":
+                            dir_path = os.path.join(path_chain, data.getName())
+                            os.mkdir(dir_path)
+                    else:
+                        dir_path = os.path.join(path_chain, data.getName())
+                        os.mkdir(dir_path)
+                except OSError:
+                    pass
+            elif data_type == "REG":
+                self.copy_file_to_temp(data, path_chain, data.getName())
+
+
     def create_user_temp_dir(self, directory, user):
         # Create an user specific temporary folder
         user_extract_folder = os.path.join(directory, user)
@@ -509,24 +638,66 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
         return user_extract_folder
 
+    def user_accounts(self, file_obj, user_accounts_path, user):
+        user_accounts_file_obj = open(user_accounts_path, "r")
+        user_accounts_obj = json.loads(user_accounts_file_obj.read())
+
+        for user_account in user_accounts_obj:
+            art = file_obj.newArtifact(self.art_user_account.getTypeID())
+            art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
+            art.addAttribute(BlackboardAttribute(self.att_uid, self.moduleName, unicode(user_account["uid"])))
+            art.addAttribute(BlackboardAttribute(self.att_username, self.moduleName, unicode(user_account["uname"])))
+            art.addAttribute(BlackboardAttribute(self.att_zoom_uid, self.moduleName, unicode(user_account["zoom_uid"])))
+            art.addAttribute(BlackboardAttribute(self.att_account_id, self.moduleName, unicode(user_account["account_id"])))
+            art.addAttribute(BlackboardAttribute(self.att_refresh_token, self.moduleName, unicode(user_account["zoomRefreshToken"])))
+            art.addAttribute(BlackboardAttribute(self.att_email, self.moduleName, unicode(user_account["zoomEmail"])))
+            art.addAttribute(BlackboardAttribute(self.att_first_name, self.moduleName, unicode(user_account["firstName"])))
+            art.addAttribute(BlackboardAttribute(self.att_last_name, self.moduleName, unicode(user_account["lastName"])))
+
+    def cached_profile_pictures(self, file_obj, cached_profile_pictures_path, user):
+        cached_profile_pictures_file_obj = open(cached_profile_pictures_path, "r")
+        cached_profile_pictures_obj = json.loads(cached_profile_pictures_file_obj.read())
+
+        for cached_profile_picture in cached_profile_pictures_obj:
+            art = file_obj.newArtifact(self.art_cached_profile_pictures.getTypeID())
+            art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
+            art.addAttribute(BlackboardAttribute(self.att_url, self.moduleName, unicode(cached_profile_picture["url"])))
+            art.addAttribute(BlackboardAttribute(self.att_path, self.moduleName, unicode(cached_profile_picture["path"])))
+            art.addAttribute(BlackboardAttribute(self.att_filesize, self.moduleName, unicode(cached_profile_picture["filesize"])))
+            art.addAttribute(BlackboardAttribute(self.att_datetime, self.moduleName, unicode(cached_profile_picture["timestamp"])))
+
+    def saved_meetings_artifact(self, file_obj, saved_meetings_path, user):
+        saved_meetings_file_obj = open(saved_meetings_path, "r")
+        saved_meetings_obj = json.loads(saved_meetings_file_obj.read())
+
+        for saved_meeting in saved_meetings_obj:
+            art = file_obj.newArtifact(self.art_saved_meetings.getTypeID())
+            art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
+            art.addAttribute(BlackboardAttribute(self.att_meeting_id, self.moduleName, unicode(saved_meeting["host_id"])))
+            art.addAttribute(BlackboardAttribute(self.att_meeting_num, self.moduleName, unicode(saved_meeting["meet_number"])))
+            art.addAttribute(BlackboardAttribute(self.att_meeting_topic, self.moduleName, unicode(saved_meeting["topic"])))
+            art.addAttribute(BlackboardAttribute(self.att_meeting_join_time, self.moduleName, unicode(saved_meeting["join_time"])))
+            art.addAttribute(BlackboardAttribute(self.att_meeting_duration, self.moduleName, unicode(saved_meeting["duration"])))
+            art.addAttribute(BlackboardAttribute(self.att_meeting_record_path, self.moduleName, unicode(saved_meeting["record_path"])))
+
     def meetings_artifact(self, file_obj, meeting_id, url, visit_count, datetime, enc_password=None):
         art = file_obj.newArtifact(self.art_meetings.getTypeID())
-        art.addAttribute(BlackboardAttribute(self.att_meeting_id, self.moduleName, str(meeting_id)))
-        art.addAttribute(BlackboardAttribute(self.att_url, self.moduleName, str(url)))
-        art.addAttribute(BlackboardAttribute(self.att_visit_count, self.moduleName, str(visit_count)))
-        art.addAttribute(BlackboardAttribute(self.att_datetime, self.moduleName, str(datetime)))
+        art.addAttribute(BlackboardAttribute(self.att_meeting_id, self.moduleName, unicode(meeting_id)))
+        art.addAttribute(BlackboardAttribute(self.att_url, self.moduleName, unicode(url)))
+        art.addAttribute(BlackboardAttribute(self.att_visit_count, self.moduleName, unicode(visit_count)))
+        art.addAttribute(BlackboardAttribute(self.att_datetime, self.moduleName, unicode(datetime)))
 
         if enc_password is not None:
-            art.addAttribute(BlackboardAttribute(self.att_enc_password, self.moduleName, str(enc_password)))
+            art.addAttribute(BlackboardAttribute(self.att_enc_password, self.moduleName, unicode(enc_password)))
 
     def leveldb_artifact(self, file_obj, browser, attributes, user):
         art = file_obj.newArtifact(self.art_levelDB.getTypeID())
         art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
-        art.addAttribute(BlackboardAttribute(self.att_browser, self.moduleName, str(browser)))
-        art.addAttribute(BlackboardAttribute(self.att_origin, self.moduleName, str(attributes[0])))
-        art.addAttribute(BlackboardAttribute(self.att_key, self.moduleName, str(attributes[1])))
-        art.addAttribute(BlackboardAttribute(self.att_value, self.moduleName, str(attributes[2])))
-        art.addAttribute(BlackboardAttribute(self.att_state, self.moduleName, str(attributes[3])))
+        art.addAttribute(BlackboardAttribute(self.att_browser, self.moduleName, unicode(browser)))
+        art.addAttribute(BlackboardAttribute(self.att_origin, self.moduleName, unicode(attributes[0])))
+        art.addAttribute(BlackboardAttribute(self.att_key, self.moduleName, unicode(attributes[1])))
+        art.addAttribute(BlackboardAttribute(self.att_value, self.moduleName, unicode(attributes[2])))
+        art.addAttribute(BlackboardAttribute(self.att_state, self.moduleName, unicode(attributes[3])))
 
 
     def cookies_artifact(self, file_obj, browser, cookies_file_path, user):
@@ -539,9 +710,9 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                 art = file_obj.newArtifact(self.art_cookies.getTypeID())
                 art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
                 art.addAttribute(BlackboardAttribute(self.att_browser, self.moduleName, str(browser)))
-                art.addAttribute(BlackboardAttribute(self.att_key, self.moduleName, str(cookie["key"])))
-                art.addAttribute(BlackboardAttribute(self.att_name, self.moduleName, str(cookie["name"])))
-                art.addAttribute(BlackboardAttribute(self.att_value, self.moduleName, str(cookie["value"])))
+                art.addAttribute(BlackboardAttribute(self.att_key, self.moduleName, unicode(cookie["key"])))
+                art.addAttribute(BlackboardAttribute(self.att_name, self.moduleName, unicode(cookie["name"])))
+                art.addAttribute(BlackboardAttribute(self.att_value, self.moduleName, unicode(cookie["value"])))
 
         cookies_file_obj.close()
 
@@ -555,10 +726,10 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                 art = file_obj.newArtifact(self.art_login_data.getTypeID())
                 art.addAttribute(BlackboardAttribute(self.att_win_user, self.moduleName, str(user)))
                 art.addAttribute(BlackboardAttribute(self.att_browser, self.moduleName, str(browser)))
-                art.addAttribute(BlackboardAttribute(self.att_url, self.moduleName, str(login_data["url"])))
-                art.addAttribute(BlackboardAttribute(self.att_user_type, self.moduleName, str(login_data["username_type"])))
-                art.addAttribute(BlackboardAttribute(self.att_username, self.moduleName, str(login_data["username"])))
-                art.addAttribute(BlackboardAttribute(self.att_password, self.moduleName, str(login_data["password"])))
+                art.addAttribute(BlackboardAttribute(self.att_url, self.moduleName, unicode(login_data["url"])))
+                art.addAttribute(BlackboardAttribute(self.att_user_type, self.moduleName, unicode(login_data["username_type"])))
+                art.addAttribute(BlackboardAttribute(self.att_username, self.moduleName, unicode(login_data["username"])))
+                art.addAttribute(BlackboardAttribute(self.att_password, self.moduleName, unicode(login_data["password"])))
 
         login_data_file_obj.close()
 

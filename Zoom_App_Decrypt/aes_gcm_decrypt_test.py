@@ -4,52 +4,80 @@ from Crypto.Cipher import AES
 from hashlib import sha256
 import binascii
 
-key = sha256("g6qC86Wju2gqBS6KAn7GCp9G/TWWbWCJuzRlt5GtDs0=".encode("utf-8")).hexdigest()
-print("Key -> " + key)
-content = base64.b64decode("DFONzhblAKMO+XXLdAAAIAAAAJrXZG5QeyaUAXF5TfWrjohVUNFr/LOa5Yh2X2pqdA/lLPyf8i1i7ALiP2c2GmVNHw==")
 
-file_obj = open("content_b64decode.bin", "wb")
-file_obj.write(content)
-file_obj.close()
+def zoom_database_values():
+    # Decrypt zoomus.enc.db and zoommeeting.enc.db values
+    key = sha256("g6qC86Wju2gqBS6KAn7GCp9G/TWWbWCJuzRlt5GtDs0=".encode("utf-8")).digest()
+    print("Key -> " + key.hex())
+    content = base64.b64decode("Yw8sJ/AWbQrnbmtcM4XJpg==")
 
-nonce = content[1:13]
-payload = content[13+12:-16]
-tag = content[-16:]
-print("Whole -> " + content.hex() + "\nWhole len -> " + str(len(content)))
-print("Nonce (IV) -> " + nonce.hex() + "\nNonce (IV) len -> " + str(len(nonce)))
-print("TAG -> " + tag.hex() + "\nTag len -> " + str(len(tag)))
-print("Payload -> " + payload.hex() + "\nPayload len -> " + str(len(payload)))
+    length = len(content)
 
-#0c 53 8d ce 16 e5 00 a3 0e f9 75 cb 74 00 00 20 00 00 00 9a d7 64 6e 50 7b 26940171794df5ab8e885550d16bfcb39ae588765f6a6a740fe52cfc9ff22d62ec02e23f67361a654d1f
+    nonce = content[1:13]
+    ignore = content[13:13+6]
+    payload = content[13+6:-16]
+    tag = content[-16:]
 
-# cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
-# decrypted_value = cipher.decrypt(content)
-# print(binascii.hexlify(decrypted_value))
+    print("Whole -> " + content.hex() + "\nWhole len -> " + str(len(content)))
+    print("Ignore -> " + ignore.hex() + "\nIgnore len -> " + str(len(ignore)))
+    print("Nonce (IV) -> " + nonce.hex() + "\nNonce (IV) len -> " + str(len(nonce)))
+    print("TAG -> " + tag.hex() + "\nTag len -> " + str(len(tag)))
+    print("Payload -> " + payload.hex() + "\nPayload len -> " + str(len(payload)))
 
-# from Crypto.Cipher import AES
-# import binascii, os
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    decrypted_value = cipher.decrypt_and_verify(payload, tag)
+    print(decrypted_value.decode("utf-8"))
 
-# def encrypt_AES_GCM(msg, secretKey):
-#     aesCipher = AES.new(secretKey, AES.MODE_GCM)
-#     ciphertext, authTag = aesCipher.encrypt_and_digest(msg)
-#     return (ciphertext, aesCipher.nonce, authTag)
 
-# def decrypt_AES_GCM(encryptedMsg, secretKey):
-#     (ciphertext, nonce, authTag) = encryptedMsg
-#     aesCipher = AES.new(secretKey, AES.MODE_GCM, nonce)
-#     plaintext = aesCipher.decrypt_and_verify(ciphertext, authTag)
-#     return plaintext
+def zoom_account_databases_key():
+    # Get account specific databases key
 
-# secretKey = os.urandom(32)  # 256-bit random encryption key
-# print("Encryption key:", binascii.hexlify(secretKey))
+    value1 = b"g6qC86Wju2gqBS6KAn7GCp9G/TWWbWCJuzRlt5GtDs"
+    value2 = b"/68ZnQkr59CFVH5JKdU+WGEhyES+cnvVha0Az8XwgdE="
 
-# msg = b'Message for AES-256-GCM + Scrypt encryption'
-# encryptedMsg = encrypt_AES_GCM(msg, secretKey)
-# print("encryptedMsg", {
-#     'ciphertext': binascii.hexlify(encryptedMsg[0]),
-#     'aesIV': binascii.hexlify(encryptedMsg[1]),
-#     'authTag': binascii.hexlify(encryptedMsg[2])
-# })
+    value1_sha256 = sha256(value1).digest()
+    value2_sha256 = sha256(value2).digest()
+    value3 = sha256(value1_sha256 + value2_sha256).digest()
 
-# decryptedMsg = decrypt_AES_GCM(encryptedMsg, secretKey)
-# print("decryptedMsg", decryptedMsg)
+    key = base64.b64encode(value3)
+
+    print(key)
+
+
+def test():
+    value1 = b"g6qC86Wju2gqBS6KAn7GCp9G/TWWbWCJuzRlt5GtDs0="
+    value2 = b"S-1-5-21-319367206-854998040-1939859893-1001"
+
+    value1_sha256 = sha256(value1).digest()
+    value2_sha256 = sha256(value2).digest()
+    value3 = sha256(value1_sha256 + value2_sha256).hexdigest()
+
+    value2_sha256_sha256 = sha256(value2_sha256).digest()
+    value2_sha256_sha256_sha256 = sha256(value2_sha256_sha256).digest()
+    key = base64.b64encode(value2_sha256_sha256_sha256).decode("utf-8")
+    
+    print(sha256(key.encode("utf-8")).digest().hex())
+
+    #key = base64.b64encode(value3)
+
+    #print(key)
+
+def test_zoom_meeting():
+    value = base64.b64decode("D9zMhNbKnTwGAhBg5SRv+EGMAq/oxjUbsCEmQx1jVd8=")
+    key = bytes.fromhex("87b0b7c92bb1a923644022c92fd95acf211e7297874274587b70fa20feff6a19")
+
+    nonce = value[1:13]
+    ignore = value[13:13+6]
+    payload = value[19:-16]
+    tag = value[-16:]
+
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    decrypted_value = cipher.decrypt_and_verify(payload, tag)
+    print(decrypted_value.decode("utf-8"))
+
+
+if __name__ == "__main__":
+    #zoom_account_databases_key()
+    #test()
+    zoom_database_values()
+    #test_zoom_meeting()

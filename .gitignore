@@ -8,3 +8,6 @@
 \Zoom_App_Decrypt\*.txt
 \Zoom_App_Decrypt\*.db
 \sqlcipher
+*db
+*txt
+*png

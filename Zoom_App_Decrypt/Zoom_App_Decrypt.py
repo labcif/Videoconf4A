@@ -2,6 +2,8 @@ import configparser, os, subprocess, base64, ntpath, sqlite3, math
 from urllib.parse import unquote_plus
 from html import unescape
 from datetime import datetime
+from Crypto.Cipher import AES
+from hashlib import sha256
 
 def convert_size(size_bytes):
    if size_bytes == 0:
@@ -19,11 +21,32 @@ class Zoom_App_Decrypt():
         self.sqlcipher_path = sqlcipher_path
         self.databases_key = self.__get_databases_key(zoom_config_file)
 
-    def __decrypt_database(self, db_enc_path):
-        sqlcipher_args = [self.sqlcipher_path, db_enc_path]
+    def __decrypt_db_field(self, value):
+        field_key = sha256(self.databases_key.encode("utf-8")).digest()
 
+        content = base64.b64decode(value)
+
+        nonce = content[1:13]
+        payload = content[13+6:-16]
+        tag = content[-16:]
+
+        cipher = AES.new(field_key, AES.MODE_GCM, nonce=nonce)
+        decrypted_value = cipher.decrypt_and_verify(payload, tag)
+
+        print(decrypted_value)
+
+        return decrypted_value.decode("utf-8")
+
+    def __decrypt_database(self, db_enc_path):
+        
         decrypted_db_dir_path = ntpath.dirname(__file__)
         decrypted_db_path = os.path.join(decrypted_db_dir_path, ntpath.basename(db_enc_path).replace(".enc", ""))
+        
+        if os.path.exists(decrypted_db_path):
+            return decrypted_db_path
+
+        sqlcipher_args = [self.sqlcipher_path, db_enc_path]
+        
         communication = "PRAGMA key ='{0}';\nPRAGMA kdf_iter = '4000';\nPRAGMA cipher_page_size = 1024;\nATTACH DATABASE '{1}' AS zoom KEY '';\nSELECT sqlcipher_export('zoom');\nDETACH DATABASE zoom;\n.exit\n".format(self.databases_key, decrypted_db_path)
         communication_bytes = str.encode(communication)
 
@@ -54,7 +77,6 @@ class Zoom_App_Decrypt():
         encoded_dpapi_encrypted_key = config.get("ZoomChat", "win_osencrypt_key").replace("ZWOSKEY", "")
 
         dpapi_encrypted_key = base64.b64decode(encoded_dpapi_encrypted_key)
-            
 
         file_obj = open("dpapi_encrypted_key", "wb")
         file_obj.write(dpapi_encrypted_key)
@@ -70,12 +92,13 @@ class Zoom_App_Decrypt():
         p.wait()
         
         if p.returncode == 0:
+
+
             os.remove(dpapi_encrypted_key_file)
             
             file_obj = open(database_key_file, "r")
             database_key = file_obj.read()
             file_obj.close()
-            
             os.remove(os.path.abspath(file_obj.name))
             return database_key
 
@@ -114,8 +137,6 @@ class Zoom_App_Decrypt():
                 "duration": row[4],
                 "record_path": unquote_plus(row[5])
             })
-
-        os.remove(decrypted_db)
         
         return saved_meetings
 
@@ -136,7 +157,30 @@ class Zoom_App_Decrypt():
                 "filesize": convert_size(row[2]),
                 "timestamp": datetime.strftime(datetime.utcfromtimestamp(float(row[3])), "%Y-%m-%d %H:%M:%S UTC")
             })
-        
-        os.remove(decrypted_db)
 
         return cached_profile_pictures
+
+    
+    def get_zoom_user_account(self, db_zoomus_enc_path):
+
+        decrypted_db = self.__decrypt_database(db_zoomus_enc_path)
+
+        query = "SELECT uid, uname, zoom_uid, account_id, zoomRefreshToken, zoomEmail, firstName, lastName FROM zoom_user_account_enc"
+
+        rows = self.__executeSqliteQuery(decrypted_db, query)
+
+        zoom_accounts = []
+
+        for row in rows:
+            zoom_accounts.append({
+                "uid": self.__decrypt_db_field(row[0]) if row[0] != "" else "",
+                "uname": self.__decrypt_db_field(row[1]) if row[1] != "" else "",
+                "zoom_uid": self.__decrypt_db_field(row[2]) if row[2] != "" else "",
+                "account_id": self.__decrypt_db_field(row[3]) if row[3] != "" else "",
+                "zoomRefreshToken": self.__decrypt_db_field(row[4]) if row[4] != "" else "",
+                "zoomEmail": self.__decrypt_db_field(row[5]) if row[5] != "" else "",
+                "firstName": self.__decrypt_db_field(row[6]) if row[6] != "" else "",
+                "lastName": self.__decrypt_db_field(row[7]) if row[7] != "" else ""
+            })
+        
+        return zoom_accounts
