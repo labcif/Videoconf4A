@@ -31,11 +31,14 @@ class Zoom_App_Decrypt():
         tag = content[-16:]
 
         cipher = AES.new(field_key, AES.MODE_GCM, nonce=nonce)
-        decrypted_value = cipher.decrypt_and_verify(payload, tag)
 
-        print(decrypted_value)
+        try:
+            decrypted_value = cipher.decrypt_and_verify(payload, tag)
+            print(decrypted_value)
 
-        return decrypted_value.decode("utf-8")
+            return decrypted_value.decode("utf-8")
+        except ValueError:
+            return None
 
     def __decrypt_database(self, db_enc_path):
         
@@ -99,7 +102,7 @@ class Zoom_App_Decrypt():
             file_obj = open(database_key_file, "r")
             database_key = file_obj.read()
             file_obj.close()
-            os.remove(os.path.abspath(file_obj.name))
+            #os.remove(os.path.abspath(file_obj.name))
             return database_key
 
     
