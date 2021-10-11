@@ -163,10 +163,11 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
             if arch_info == 64:
                 self.path_decrypt_chromium = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decrypt_chromium.exe")
                 self.path_leveldb_parse = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hindsight.exe")
-                self.path_os_check = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_os_datasource.exe")
                 self.path_mimikatz = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mimikatz.exe")
                 self.sqlcipher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sqlcipher_x64.exe")
                 self.zoom_app_decrypt = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zoom_app_decrypt.exe")
+            else:
+                raise IngestModuleException(Videoconf4AIngestModuleFactory.moduleName + "module can only run on x64 systems.")
 
             # TODO: Build 32 bit executables
             if not os.path.exists(self.path_decrypt_chromium) and not os.path.exists(self.path_leveldb_parse) and not os.path.exists(self.path_os_check) and not os.path.exists(self.path_mimikatz) and not os.path.exists(self.sqlcipher) and not os.path.exists(self.zoom_app_decrypt):
