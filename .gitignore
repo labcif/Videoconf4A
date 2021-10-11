@@ -14,4 +14,4 @@
 database_key
 user_database_key
 local_state_key_dec
-Zoom_App_Decrypt\aes_gcm_decrypt_test.py
+Zoom_App_Decrypt/aes_gcm_decrypt_test.py
