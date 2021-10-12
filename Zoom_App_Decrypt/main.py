@@ -2,13 +2,13 @@ from Zoom_App_Decrypt import Zoom_App_Decrypt
 from DPAPI_Tools.decypher_masterkey import decypher_masterkey
 import sys, json, os
 
-# config file -> C:\Users\jclo9\AppData\Roaming\Zoom\data\Zoom.us.ini
+# config file -> C:\Users\USER\AppData\Roaming\Zoom\data\Zoom.us.ini
 # sqlcipher -> .\sqlcipher_x64.exe
 # mimikatz -> .\mimikatz.exe
-# sid -> S-1-5-21-319367206-854998040-1939859893-1001
+# user sid -> S-1-5-21-xxxxxxxxx-xxxxxxxxx-xxxxxxxxxx-xxxx
 # Password -> you know it...
-# master key file -> C:\Users\jclo9\AppData\Roaming\Microsoft\Protect\S-1-5-21-319367206-854998040-1939859893-1001\f5bffe91-142a-4a1e-a747-89fd497df810
-# Zoomus.enc.db -> C:\Users\jclo9\AppData\Roaming\Zoom\data\zoomus.enc.db
+# master key file -> C:\Users\USER\AppData\Roaming\Microsoft\Protect\S-1-5-21-xxxxxxxxx-xxxxxxxxx-xxxxxxxxxx-xxxx\MASTER_KEY_FILE
+# Zoomus.enc.db -> C:\Users\USER\AppData\Roaming\Zoom\data\zoomus.enc.db
 
 if __name__ == "__main__":
     zoom_config_file = sys.argv[1]
