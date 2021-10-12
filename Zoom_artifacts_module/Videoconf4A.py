@@ -164,12 +164,11 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                 self.path_decrypt_chromium = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decrypt_chromium.exe")
                 self.path_leveldb_parse = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hindsight.exe")
                 self.path_os_check = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_os_datasource.exe")
-                self.path_mimikatz = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mimikatz.exe")
                 self.sqlcipher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sqlcipher_x64.exe")
                 self.zoom_app_decrypt = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zoom_app_decrypt.exe")
 
             # TODO: Build 32 bit executables
-            if not os.path.exists(self.path_decrypt_chromium) and not os.path.exists(self.path_leveldb_parse) and not os.path.exists(self.path_os_check) and not os.path.exists(self.path_mimikatz) and not os.path.exists(self.sqlcipher) and not os.path.exists(self.zoom_app_decrypt):
+            if not os.path.exists(self.path_decrypt_chromium) and not os.path.exists(self.path_leveldb_parse) and not os.path.exists(self.path_os_check) and not os.path.exists(self.sqlcipher) and not os.path.exists(self.zoom_app_decrypt):
                 raise IngestModuleException("Required executable files not found on module directory. Required executables are \"decrypt_chromium.exe\" and \"hindsight.exe\"")
         else:
             raise IngestModuleException(Videoconf4AIngestModuleFactory.moduleName + "module can only run on Windows.")
@@ -256,7 +255,7 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
         if len(software_files) == 0:
             self.log(Level.INFO, "size of SOFTWARE files -> " + str(len(software_files)))
-            raise IngestModuleException("Datasource OS is not a Windows system")
+            raise IngestModuleException("Datasource OS is not a recognized Windows system")
 
         software_hive = None
 
@@ -276,11 +275,11 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
 
             if rc != 0:
                 self.log(Level.INFO, "rc is " + str(rc))
-                raise IngestModuleException("Datasource OS is not a Windows system")
-            self.log(Level.INFO, "Datasource OS is -> " + outputFromRun)
+                raise IngestModuleException("Datasource OS is not a recognized Windows system")
+            self.log(Level.INFO, "Datasource OS is " + "\"" + outputFromRun + "\"")
         else:
             self.log(Level.INFO, "No software file that is the hive")
-            raise IngestModuleException("Datasource OS is not a Windows system")
+            raise IngestModuleException("Datasource OS is not a recognized Windows system")
 
         browser_data = fileManager.findFiles(dataSource, "%", "/Users/%/AppData/Local/%/%/User Data")
         self.browser_dirs_extract(browser_data, temporaryDirectory)
@@ -441,8 +440,8 @@ class Videoconf4AIngestModule(DataSourceIngestModule):
                 for master_key_obj in master_key_list:
 
                     # Get App artifacts
-                    command_line_app_us = [str(self.zoom_app_decrypt), zoom_config_file, self.sqlcipher, self.path_mimikatz, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], zoom_us_enc_db_file_path, app_user_temporary_directory]
-                    #command_line_app_meeting = [str(self.zoom_app_decrypt), zoom_config_file, self.sqlcipher, self.path_mimikatz, master_key_obj["sid"], password, master_key_obj["master_key_file"], zoom_meeting_enc_db_file_path, app_user_temporary_directory]
+                    command_line_app_us = [str(self.zoom_app_decrypt), zoom_config_file, self.sqlcipher, master_key_obj["sid"], password, master_key_obj["master_key_extracted_dir"], zoom_us_enc_db_file_path, app_user_temporary_directory]
+                    #command_line_app_meeting = [str(self.zoom_app_decrypt), zoom_config_file, self.sqlcipher, master_key_obj["sid"], password, master_key_obj["master_key_file"], zoom_meeting_enc_db_file_path, app_user_temporary_directory]
 
                     self.log(Level.INFO, str(command_line_app_us))
                     #self.log(Level.INFO, str(command_line_app_meeting))

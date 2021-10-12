@@ -15,11 +15,9 @@ def convert_size(size_bytes):
    return "%s %s" % (s, size_name[i])
 
 class Zoom_App_Decrypt():
-    def __init__(self, zoom_config_file, sqlcipher_path, mimikatz_path, user_masterkey): #db_zoom_us=None, db_zoom_meetings=None, db_user_jid=None, db_user_jid_asyn=None, db_user_jid_sync=None, db_user_jid_idx=None):
-        self.user_masterkey = user_masterkey
-        self.mimikatz_path = mimikatz_path
+    def __init__(self, sqlcipher_path, databases_key): #db_zoom_us=None, db_zoom_meetings=None, db_user_jid=None, db_user_jid_asyn=None, db_user_jid_sync=None, db_user_jid_idx=None):
+        self.databases_key = databases_key
         self.sqlcipher_path = sqlcipher_path
-        self.databases_key = self.__get_databases_key(zoom_config_file)
 
     def __decrypt_db_field(self, value):
         field_key = sha256(self.databases_key.encode("utf-8")).digest()
@@ -67,43 +65,6 @@ class Zoom_App_Decrypt():
         # Make custom exception?
         print("Error while decrypting " + ntpath.basename(db_enc_path) + "database...")
         exit(1)
-
-    def __get_databases_key(self, zoom_config_file):
-        config = configparser.ConfigParser()
-
-        try:
-            config.read(zoom_config_file)
-        except configparser.MissingSectionHeaderError:
-            print("File is not a config file or is incorrectly built.")
-            exit(1)
-
-        encoded_dpapi_encrypted_key = config.get("ZoomChat", "win_osencrypt_key").replace("ZWOSKEY", "")
-
-        dpapi_encrypted_key = base64.b64decode(encoded_dpapi_encrypted_key)
-
-        file_obj = open("dpapi_encrypted_key", "wb")
-        file_obj.write(dpapi_encrypted_key)
-        file_obj.close()
-
-        dpapi_encrypted_key_file = os.path.abspath(file_obj.name)
-
-        database_key_file = "database_key"
-
-        mimikatz_args = [self.mimikatz_path, "privilege::debug", "log log_mimikatz.txt", "dpapi::blob /in:\"{0}\" /masterkey:{1} /unprotect /out:\"{2}\"".format(dpapi_encrypted_key_file, self.user_masterkey, database_key_file), "exit"]
-
-        p = subprocess.Popen(args=mimikatz_args, stderr=subprocess.PIPE, stdout=subprocess.PIPE, shell=False)
-        p.wait()
-        
-        if p.returncode == 0:
-
-
-            os.remove(dpapi_encrypted_key_file)
-            
-            file_obj = open(database_key_file, "r")
-            database_key = file_obj.read()
-            file_obj.close()
-            #os.remove(os.path.abspath(file_obj.name))
-            return database_key
 
     
     def __executeSqliteQuery(self, db_file, query):
